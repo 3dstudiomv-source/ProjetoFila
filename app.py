@@ -3,140 +3,139 @@ import json
 import os
 import time
 
-# --- 1. CONFIGURAÇÃO DA PÁGINA (Deve ser o primeiro comando) ---
-st.set_page_config(page_title="Fila Smart - 3D Studio", page_icon="🎫", layout="centered")
+# 1. CONFIGURAÇÃO INICIAL (Obrigatório ser o primeiro comando)
+st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫", layout="centered")
 
-# --- 2. ESTILO VISUAL (CSS) ---
+# 2. FUNÇÕES DE ARQUIVO (Com tratamento de erro robusto)
+def carregar_dados():
+    default = {"fila": [], "senha_atual": 0, "chamados": 0}
+    if not os.path.exists("dados_fila.json"):
+        return default
+    try:
+        with open("dados_fila.json", "r", encoding='utf-8') as f:
+            content = f.read()
+            if not content: return default
+            return json.loads(content)
+    except:
+        return default
+
+def salvar_dados(dados):
+    with open("dados_fila.json", "w", encoding='utf-8') as f:
+        json.dump(dados, f, indent=4)
+
+# Inicialização dos dados
+dados = carregar_dados()
+
+# 3. ESTILO CSS
 st.markdown("""
     <style>
-    .stMetric { background-color: #f8f9fa; padding: 15px; border-radius: 12px; border: 1px solid #e0e0e0; }
-    .main-title { font-size: 32px; font-weight: bold; text-align: center; color: #1E1E1E; padding-bottom: 10px; }
+    .main { text-align: center; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; font-weight: bold; }
+    .status-card { padding: 20px; border-radius: 15px; border: 1px solid #ddd; margin-bottom: 20px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. FUNÇÕES DE DADOS ---
-def carregar_dados():
-    if os.path.exists("dados_fila.json"):
-        try:
-            with open("dados_fila.json", "r") as f:
-                return json.load(f)
-        except:
-            return {"fila": [], "senha_atual": 0, "chamados": 0}
-    return {"fila": [], "senha_atual": 0, "chamados": 0}
-
-def salvar_dados(dados):
-    with open("dados_fila.json", "w") as f:
-        json.dump(dados, f)
-
-# Carrega os dados IMEDIATAMENTE
-dados = carregar_dados()
-
-# --- 4. LÓGICA DE URL (QUERY PARAMS) ---
-# No Streamlit moderno, usamos st.query_params como um dicionário
-params = st.query_params
-id_na_url = params.get("id", None)
-
-# --- 5. PAINEL DO ADMINISTRADOR (LATERAL) ---
+# 4. PAINEL DO ADMINISTRADOR (LATERAL)
 with st.sidebar:
-    st.header("🔐 Gestão da Fila")
-    senha_admin = st.text_input("Senha Admin", type="password")
+    st.header("⚙️ Administração")
+    senha = st.text_input("Senha Master", type="password")
     
-    if senha_admin == "01a02b03c0":
-        st.success("Acesso Master Ativo")
-        st.divider()
-        
+    if senha == "01a02b03c0":
+        st.success("Acesso Liberado")
         total = dados["senha_atual"]
         chamados = dados["chamados"]
-        espera = total - chamados
         
-        c1, c2 = st.columns(2)
-        c1.metric("Emitidas", total)
-        c2.metric("No Painel", chamados)
-        st.metric("Aguardando Agora", espera)
+        st.metric("Total de Senhas", total)
+        st.metric("Chamadas no Painel", chamados)
+        st.metric("Restante na Fila", total - chamados)
         
         st.divider()
-        
-        if st.button("🔔 CHAMAR PRÓXIMO (1)", use_container_width=True, type="primary"):
+        if st.button("🔔 CHAMAR PRÓXIMO (1)"):
             if chamados < total:
                 dados["chamados"] += 1
                 salvar_dados(dados)
                 st.rerun()
         
-        if st.button("🚀 CHAMAR GRUPO (10)", use_container_width=True):
-            dados["chamados"] = min(dados["chamados"] + 10, total)
+        if st.button("🚀 CHAMAR GRUPO (10)"):
+            dados["chamados"] = min(chamados + 10, total)
             salvar_dados(dados)
             st.rerun()
             
         st.divider()
-        st.subheader("📋 Próximos:")
-        proximos = [p for p in dados["fila"] if p["senha"] > chamados][:5]
-        for p in proximos:
-            st.write(f"**{p['senha']}°** - {p['nome']}")
+        if st.button("♻️ RESETAR TUDO"):
+            if st.checkbox("Confirmar Limpeza?"):
+                salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
+                st.query_params.clear()
+                st.rerun()
+    elif senha != "":
+        st.error("Senha Incorreta")
 
-        if st.button("♻️ RESETAR SISTEMA"):
-            salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
-            st.query_params.clear()
-            st.rerun()
-    elif senha_admin != "":
-        st.error("Senha incorreta")
+# 5. LÓGICA DO USUÁRIO (CENTRAL)
+st.title("🎫 Sistema de Fila Virtual")
 
-# --- 6. INTERFACE DO USUÁRIO (CENTRAL) ---
-st.markdown('<p class="main-title">🎫 Sistema de Fila Virtual</p>', unsafe_allow_html=True)
+# Lemos o ID da URL usando a nova API do Streamlit
+params = st.query_params
+id_usuario = params.get("id")
 
-# Lógica principal de exibição
-if id_na_url is None:
-    # TELA DE ENTRADA
-    with st.container(border=True):
-        st.subheader("Bem-vindo! Pegue sua senha:")
-        nome = st.text_input("Qual o seu nome?")
-        if st.button("GERAR MINHA SENHA", use_container_width=True, type="primary"):
-            if nome:
+if id_usuario is None:
+    # --- TELA DE CADASTRO ---
+    st.markdown("### Bem-vindo ao evento!")
+    with st.container():
+        nome = st.text_input("Digite seu nome para entrar na fila:")
+        if st.button("PEGAR MINHA SENHA"):
+            if nome.strip():
                 dados["senha_atual"] += 1
                 nova_senha = dados["senha_atual"]
                 dados["fila"].append({"nome": nome, "senha": nova_senha})
                 salvar_dados(dados)
+                # Define o ID na URL e recarrega
                 st.query_params["id"] = str(nova_senha)
                 st.rerun()
             else:
-                st.warning("Por favor, digite seu nome.")
+                st.warning("Por favor, preencha seu nome.")
 else:
-    # TELA DE ACOMPANHAMENTO
+    # --- TELA DE ACOMPANHAMENTO ---
     try:
-        minha_senha = int(id_na_url)
+        minha_senha = int(id_usuario)
         user_info = next((p for p in dados["fila"] if p["senha"] == minha_senha), None)
-        nome_user = user_info["nome"] if user_info else "Visitante"
+        nome_cliente = user_info["nome"] if user_info else "Visitante"
         
         posicao = minha_senha - dados["chamados"]
 
         if posicao > 10:
-            st.info(f"### Olá, **{nome_user}**!")
-            st.write(f"Sua senha: **{minha_senha}** | Painel: **{dados['chamados']}**")
+            # Espera Normal
+            st.info(f"### Olá, {nome_cliente}!")
+            st.metric("Sua Senha", minha_senha)
             st.metric("Pessoas na sua frente", posicao)
-            st.write("⏳ Ainda temos um tempinho.")
-
+            st.write("⏳ Você ainda tem tempo. Aproveite as outras atrações!")
+            
         elif 1 <= posicao <= 10:
-            st.error(f"## 🏃‍♂️ {nome_user.upper()}, PREPARE-SE!")
-            st.markdown(f"### Você é o **{posicao}°** da fila.")
-            st.markdown("### 📍 DIRIJA-SE AO LOCAL DO EVENTO AGORA.")
+            # Aviso de Proximidade (Aviso dos 10)
+            st.error(f"## 🏃‍♂️ {nome_cliente.upper()}, VENHA AGORA!")
+            st.markdown(f"### Você é o **{posicao}º** da fila.")
+            st.markdown("---")
+            st.markdown("### 📍 DIRIJA-SE AO LOCAL DO EVENTO IMEDIATAMENTE.")
             st.balloons()
 
         elif posicao == 0:
-            st.success(f"## 🎉 {nome_user.upper()}, SUA VEZ!")
-            st.markdown("### 🟢 APRESENTE-SE NA ENTRADA IMEDIATAMENTE.")
-
+            # Chegou a vez
+            st.success(f"## 🎉 {nome_cliente.upper()}, SUA VEZ!")
+            st.markdown("### 🟢 APRESENTE-SE NA ENTRADA.")
+            st.balloons()
+            
         else:
-            st.warning(f"⚠️ A senha {minha_senha} já foi chamada.")
-            if st.button("Pegar nova senha"):
+            # Já passou
+            st.warning("Sua senha já foi chamada ou é inválida.")
+            if st.button("Pegar Nova Senha"):
                 st.query_params.clear()
                 st.rerun()
-                
+
+        # AUTO-REFRESH: Só acontece se o usuário estiver acompanhando a senha
+        time.sleep(10)
+        st.rerun()
+
     except Exception as e:
-        st.error("Erro ao ler sua senha. Tente pegar uma nova.")
-        if st.button("Voltar ao início"):
+        st.error("Erro no link da senha.")
+        if st.button("Voltar ao Início"):
             st.query_params.clear()
             st.rerun()
-
-# --- 7. AUTO-REFRESH (POSICIONADO NO FINAL) ---
-# Atualiza a página a cada 10 segundos para ver se a fila andou
-time.sleep(10)
-st.rerun()

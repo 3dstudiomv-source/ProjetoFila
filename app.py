@@ -57,3 +57,7 @@ with st.sidebar:
             
         if st.button("RESETAR TUDO"):
             if st.checkbox("Confirmar?"):
+                gerenciar_dados("salvar", {"fila": [], "atual": 0, "chamados": 0})
+                st.query_params.clear()
+                st.session_state.clear()
+                st.rerun()

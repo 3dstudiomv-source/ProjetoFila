@@ -2,7 +2,7 @@ import streamlit as st
 import json, os, time
 
 # 1. Configuração
-st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫")
+st.set_page_config(page_title="Perícia ao Alcance de todos", page_icon="🎫")
 
 # 2. Funções de Dados
 def gerenciar_dados(acao="ler", info=None):

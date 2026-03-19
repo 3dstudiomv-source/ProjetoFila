@@ -3,13 +3,25 @@ import json
 import os
 import time
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Gestão de Fila Pro", page_icon="📊")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Fila Inteligente - 3D Studio", page_icon="🎫", layout="centered")
 
+# Estilo visual para melhorar a experiência
+st.markdown("""
+    <style>
+    .stMetric { background-color: #f8f9fa; padding: 15px; border-radius: 12px; border: 1px solid #e0e0e0; }
+    .main-title { font-size: 32px; font-weight: bold; text-align: center; color: #1E1E1E; padding-bottom: 10px; }
+    div[data-testid="stExpander"] { border: none; box-shadow: none; }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- FUNÇÕES DE PERSISTÊNCIA ---
 def carregar_dados():
     if os.path.exists("dados_fila.json"):
-        with open("dados_fila.json", "r") as f:
-            return json.load(f)
+        try:
+            with open("dados_fila.json", "r") as f:
+                return json.load(f)
+        except: pass
     return {"fila": [], "senha_atual": 0, "chamados": 0}
 
 def salvar_dados(dados):
@@ -17,79 +29,52 @@ def salvar_dados(dados):
         json.dump(dados, f)
 
 dados = carregar_dados()
-params = st.query_params
-id_na_url = params.get("id")
+id_na_url = st.query_params.get("id")
 
-# --- PAINEL ADMIN (Lateral) ---
-st.sidebar.header("⚙️ Painel de Controle")
-senha_input = st.sidebar.text_input("Senha de Acesso", type="password")
-
-# A nova senha que você solicitou
-if senha_input == "01a02b03c0":
-    st.sidebar.success("Acesso Autorizado")
+# --- PAINEL DO ADMINISTRADOR (LATERAL) ---
+with st.sidebar:
+    st.header("🔐 Gestão da Fila")
+    senha_admin = st.text_input("Senha Admin", type="password")
     
-    # Cálculos para as métricas
-    total_emitidas = dados["senha_atual"]
-    senha_no_painel = dados["chamados"]
-    em_espera = total_emitidas - senha_no_painel
-    
-    # Mostrando os dados de forma organizada
-    st.sidebar.divider()
-    col1, col2 = st.sidebar.columns(2)
-    col1.metric("Emitidas", total_emitidas)
-    col2.metric("Chamadas", senha_no_painel)
-    st.sidebar.metric("Aguardando agora", em_espera)
-    st.sidebar.divider()
-
-    if st.sidebar.button("🔔 CHAMAR PRÓXIMO", use_container_width=True):
-        if senha_no_painel < total_emitidas:
-            dados["chamados"] += 1
+    if senha_admin == "01a02b03c0":
+        st.success("Acesso Master Ativo")
+        st.divider()
+        
+        # Métricas de Controle
+        total = dados["senha_atual"]
+        chamados = dados["chamados"]
+        espera = total - chamados
+        
+        c1, c2 = st.columns(2)
+        c1.metric("Emitidas", total)
+        c2.metric("No Painel", chamados)
+        st.metric("Aguardando Agora", espera)
+        
+        st.divider()
+        
+        # Botões de Ação
+        if st.button("🔔 CHAMAR PRÓXIMO (1)", use_container_width=True, type="primary"):
+            if chamados < total:
+                dados["chamados"] += 1
+                salvar_dados(dados)
+                st.rerun()
+        
+        if st.button("🚀 CHAMAR GRUPO (10)", use_container_width=True):
+            novo_limite = min(chamados + 10, total)
+            dados["chamados"] = novo_limite
             salvar_dados(dados)
             st.rerun()
-        else:
-            st.sidebar.warning("Não há ninguém na fila.")
+            
+        st.divider()
+        st.subheader("📋 Próximos nomes:")
+        proximos = [p for p in dados["fila"] if p["senha"] > chamados][:5]
+        for p in proximos:
+            st.write(f"**{p['senha']}°** - {p['nome']}")
 
-    if st.sidebar.button("♻️ Resetar Sistema Completo"):
-        if st.sidebar.checkbox("Confirmar reset?"):
-            dados = {"fila": [], "senha_atual": 0, "chamados": 0}
-            salvar_dados(dados)
-            st.query_params.clear()
-            st.rerun()
-else:
-    if senha_input != "":
-        st.sidebar.error("Senha Incorreta")
-
-# --- LÓGICA DO CLIENTE (Corpo Principal) ---
-st.title("🎫 Sistema de Fila")
-
-if not id_na_url:
-    st.header("📲 Pegar Senha")
-    nome = st.text_input("Seu nome:")
-    if st.button("Gerar Senha"):
-        if nome:
-            dados["senha_atual"] += 1
-            nova_senha = dados["senha_atual"]
-            dados["fila"].append({"nome": nome, "senha": nova_senha})
-            salvar_dados(dados)
-            st.query_params["id"] = nova_senha
-            st.rerun()
-else:
-    minha_senha = int(id_na_url)
-    faltam = minha_senha - dados["chamados"]
-
-    with st.container(border=True):
-        st.write(f"### Olá! Sua senha é: **{minha_senha}**")
-        if faltam > 0:
-            st.metric("Pessoas na sua frente", faltam)
-            st.info("Aguarde. Esta página atualiza automaticamente.")
-        elif faltam == 0:
-            st.success("🎉 SUA VEZ CHEGOU!")
-            st.balloons()
-        else:
-            st.error("❌ Sua vez já passou.")
-            if st.button("Pegar nova senha"):
+        if st.button("♻️ RESETAR SISTEMA"):
+            if st.checkbox("Confirmar limpeza?"):
+                salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
                 st.query_params.clear()
                 st.rerun()
-
-    time.sleep(15)
-    st.rerun()
+    elif senha_admin != "":
+        st

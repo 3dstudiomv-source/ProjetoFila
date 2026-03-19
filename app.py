@@ -1,7 +1,7 @@
 import streamlit as st
 import json, os, time
 
-# 1. Configuração
+# 1. Configuração (ÍCONE DE LUPA)
 st.set_page_config(page_title="Perícia ao Alcance de todos", page_icon="🔍")
 
 # 2. Funções de Dados
@@ -22,36 +22,49 @@ def gerenciar_dados(acao="ler", info=None):
 
 db = gerenciar_dados("ler")
 
-# 3. LÓGICA DE PERSISTÊNCIA (O SEGREDO ESTÁ AQUI)
-# Pegamos o ID diretamente da URL
+# 3. Lógica de Persistência
 id_cliente = st.query_params.get("id")
 
-# 4. Painel Admin (Lateral)
+# 4. Painel Lateral (Admin)
 with st.sidebar:
     st.header("⚙️ Admin")
     pw = st.text_input("Senha", type="password")
     if pw == "01a02b03c0":
         st.success("Admin Ativo")
-        t_em = db.get("atual", 0)
-        t_ch = db.get("chamados", 0)
-        st.metric("Total", t_em, delta=f"+{t_em-t_ch} aguardando")
         
-        if st.button("🔔 CHAMAR PRÓXIMO", type="primary"):
-            if t_ch < t_em:
+        # VARIÁVEIS DO PAINEL
+        t_inscritos = db.get("atual", 0)     # Total que pegou senha
+        t_chamados = db.get("chamados", 0)   # Senha atual no painel
+        em_espera = t_inscritos - t_chamados # Quantos faltam atender
+        
+        # EXIBIÇÃO DAS MÉTRICAS NO ADMIN
+        st.metric("Total de Inscrições", t_inscritos)
+        st.metric("Senha Atual no Painel", t_chamados)
+        st.metric("Pessoas em Espera", em_espera, delta_color="inverse")
+        
+        st.divider()
+        
+        if st.button("🔔 CHAMAR PRÓXIMO", type="primary", use_container_width=True):
+            if t_chamados < t_inscritos:
                 db["chamados"] += 1
                 gerenciar_dados("salvar", db)
                 st.rerun()
         
+        st.divider()
+        st.write("📋 PRÓXIMOS DA FILA:")
+        lista = [p for p in db.get("fila", []) if p.get("s", 0) > t_chamados][:10]
+        for p in lista:
+            st.text(f"{p.get('s')} - {p.get('n')}")
+            
         if st.button("♻️ RESET TOTAL"):
             if st.checkbox("Limpar tudo?"):
                 gerenciar_dados("salvar", {"fila": [], "atual": 0, "chamados": 0})
                 st.query_params.clear()
                 st.rerun()
 
-# 5. Interface Principal
-st.title("🔍 Pericia ao Alcance de Todos")
+# 5. Interface Principal (Cliente)
+st.title("🔍 Fila 3D Studio")
 
-# SE NÃO TEM ID NA URL, MOSTRA CADASTRO
 if not id_cliente:
     st.subheader("Bem-vindo! Pegue sua senha:")
     nome = st.text_input("Seu Nome:")
@@ -61,15 +74,11 @@ if not id_cliente:
             nova = db["atual"]
             db["fila"].append({"n": nome, "s": nova})
             gerenciar_dados("salvar", db)
-            
-            # CRITICAL: Fixa o ID na URL antes de recarregar
             st.query_params["id"] = str(nova)
-            time.sleep(0.5) # Pequena pausa para o navegador processar a URL
+            time.sleep(0.5) 
             st.rerun()
         else:
             st.warning("Nome obrigatório.")
-
-# SE JÁ TEM ID, MOSTRA O STATUS (E NÃO SAI DAQUI)
 else:
     try:
         minha_s = int(id_cliente)
@@ -82,22 +91,19 @@ else:
             if pos > 0:
                 st.info(f"📍 Olá {nome_cli}! Sua senha é **{minha_s}**")
                 st.metric("Posição na Fila", f"{pos}º")
-                st.write("A tela atualizará sozinha. Não feche esta aba.")
             elif pos == 0:
                 st.success(f"🎉 SUA VEZ, {nome_cli.upper()}!")
                 st.subheader("APRESENTE ESTA TELA NA ENTRADA")
                 st.balloons()
             else:
-                st.warning("Sua senha já passou ou foi chamada.")
+                st.warning("Sua senha já passou.")
                 if st.button("Pegar Nova Senha"):
                     st.query_params.clear()
                     st.rerun()
         else:
-            # Se o ID na URL não existe no banco, volta pro início
             st.query_params.clear()
             st.rerun()
 
-        # Atualização automática suave
         time.sleep(10)
         st.rerun()
         

@@ -4,7 +4,7 @@ import os
 import time
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Fila Virtual Blindada", page_icon="⏳")
+st.set_page_config(page_title="Gestão de Fila Pro", page_icon="📊")
 
 def carregar_dados():
     if os.path.exists("dados_fila.json"):
@@ -17,32 +17,53 @@ def salvar_dados(dados):
         json.dump(dados, f)
 
 dados = carregar_dados()
-
-# --- MÁGICA DA URL (Lê a senha direto do link do navegador) ---
-# Se o link for meusite.app/?id=15, o código abaixo pega o "15"
 params = st.query_params
 id_na_url = params.get("id")
 
-# --- PAINEL ADMIN ---
-st.sidebar.header("⚙️ Admin")
-if st.sidebar.text_input("Senha", type="password") == "123":
-    if st.sidebar.button("🔔 CHAMAR PRÓXIMO"):
-        if dados["chamados"] < dados["senha_atual"]:
+# --- PAINEL ADMIN (Lateral) ---
+st.sidebar.header("⚙️ Painel de Controle")
+senha_input = st.sidebar.text_input("Senha de Acesso", type="password")
+
+# A nova senha que você solicitou
+if senha_input == "01a02b03c0":
+    st.sidebar.success("Acesso Autorizado")
+    
+    # Cálculos para as métricas
+    total_emitidas = dados["senha_atual"]
+    senha_no_painel = dados["chamados"]
+    em_espera = total_emitidas - senha_no_painel
+    
+    # Mostrando os dados de forma organizada
+    st.sidebar.divider()
+    col1, col2 = st.sidebar.columns(2)
+    col1.metric("Emitidas", total_emitidas)
+    col2.metric("Chamadas", senha_no_painel)
+    st.sidebar.metric("Aguardando agora", em_espera)
+    st.sidebar.divider()
+
+    if st.sidebar.button("🔔 CHAMAR PRÓXIMO", use_container_width=True):
+        if senha_no_painel < total_emitidas:
             dados["chamados"] += 1
             salvar_dados(dados)
             st.rerun()
-    if st.sidebar.button("♻️ Resetar"):
-        dados = {"fila": [], "senha_atual": 0, "chamados": 0}
-        salvar_dados(dados)
-        st.query_params.clear()
-        st.rerun()
+        else:
+            st.sidebar.warning("Não há ninguém na fila.")
 
-# --- LÓGICA PRINCIPAL ---
-st.title("🎫 Fila Virtual")
+    if st.sidebar.button("♻️ Resetar Sistema Completo"):
+        if st.sidebar.checkbox("Confirmar reset?"):
+            dados = {"fila": [], "senha_atual": 0, "chamados": 0}
+            salvar_dados(dados)
+            st.query_params.clear()
+            st.rerun()
+else:
+    if senha_input != "":
+        st.sidebar.error("Senha Incorreta")
 
-# SE NÃO TEM ID NA URL (Usuário novo)
+# --- LÓGICA DO CLIENTE (Corpo Principal) ---
+st.title("🎫 Sistema de Fila")
+
 if not id_na_url:
-    st.header("📲 Entre na Fila")
+    st.header("📲 Pegar Senha")
     nome = st.text_input("Seu nome:")
     if st.button("Gerar Senha"):
         if nome:
@@ -50,28 +71,25 @@ if not id_na_url:
             nova_senha = dados["senha_atual"]
             dados["fila"].append({"nome": nome, "senha": nova_senha})
             salvar_dados(dados)
-            # SALVA O ID NA URL (Isso fixa a sessão no celular do cliente)
             st.query_params["id"] = nova_senha
             st.rerun()
 else:
-    # USUÁRIO JÁ TEM ID (Lemos da URL)
     minha_senha = int(id_na_url)
     faltam = minha_senha - dados["chamados"]
 
     with st.container(border=True):
-        st.write(f"### Sua Senha: **{minha_senha}**")
+        st.write(f"### Olá! Sua senha é: **{minha_senha}**")
         if faltam > 0:
-            st.metric("Pessoas na frente", faltam)
-            st.info("Pode sair do app. Sua posição está salva neste link!")
+            st.metric("Pessoas na sua frente", faltam)
+            st.info("Aguarde. Esta página atualiza automaticamente.")
         elif faltam == 0:
-            st.success("🎉 SUA VEZ! Entre agora.")
+            st.success("🎉 SUA VEZ CHEGOU!")
             st.balloons()
         else:
-            st.error("❌ Sua vez passou.")
+            st.error("❌ Sua vez já passou.")
             if st.button("Pegar nova senha"):
                 st.query_params.clear()
                 st.rerun()
 
-    # Atualiza a cada 15 segundos para não sobrecarregar
     time.sleep(15)
     st.rerun()

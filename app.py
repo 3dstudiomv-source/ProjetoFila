@@ -3,10 +3,10 @@ import json
 import os
 import time
 
-# 1. CONFIGURAÇÃO INICIAL (Obrigatório ser o primeiro comando)
+# 1. CONFIGURAÇÃO INICIAL
 st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫", layout="centered")
 
-# 2. FUNÇÕES DE ARQUIVO (Com tratamento de erro robusto)
+# 2. FUNÇÕES DE ARQUIVO
 def carregar_dados():
     default = {"fila": [], "senha_atual": 0, "chamados": 0}
     if not os.path.exists("dados_fila.json"):
@@ -23,15 +23,13 @@ def salvar_dados(dados):
     with open("dados_fila.json", "w", encoding='utf-8') as f:
         json.dump(dados, f, indent=4)
 
-# Inicialização dos dados
 dados = carregar_dados()
 
 # 3. ESTILO CSS
 st.markdown("""
     <style>
-    .main { text-align: center; }
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; font-weight: bold; }
-    .status-card { padding: 20px; border-radius: 15px; border: 1px solid #ddd; margin-bottom: 20px; }
+    .stButton>button { width: 100%; border-radius: 10px; font-weight: bold; }
+    .prox-lista { font-size: 14px; color: #555; background: #f0f2f6; padding: 5px 10px; border-radius: 5px; margin-bottom: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -47,10 +45,9 @@ with st.sidebar:
         
         st.metric("Total de Senhas", total)
         st.metric("Chamadas no Painel", chamados)
-        st.metric("Restante na Fila", total - chamados)
         
         st.divider()
-        if st.button("🔔 CHAMAR PRÓXIMO (1)"):
+        if st.button("🔔 CHAMAR PRÓXIMO (1)", type="primary"):
             if chamados < total:
                 dados["chamados"] += 1
                 salvar_dados(dados)
@@ -62,6 +59,18 @@ with st.sidebar:
             st.rerun()
             
         st.divider()
+        st.subheader("📋 Próximos 10 nomes:")
+        
+        # Filtra apenas quem ainda não foi chamado (senha > chamados)
+        proximos = [p for p in dados["fila"] if p["senha"] > chamados][:10]
+        
+        if proximos:
+            for p in proximos:
+                st.markdown(f"<div class='prox-lista'><b>{p['senha']}°</b> - {p['nome']}</div>", unsafe_allow_html=True)
+        else:
+            st.write("Ninguém aguardando na fila.")
+
+        st.divider()
         if st.button("♻️ RESETAR TUDO"):
             if st.checkbox("Confirmar Limpeza?"):
                 salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
@@ -72,70 +81,19 @@ with st.sidebar:
 
 # 5. LÓGICA DO USUÁRIO (CENTRAL)
 st.title("🎫 Sistema de Fila Virtual")
-
-# Lemos o ID da URL usando a nova API do Streamlit
 params = st.query_params
 id_usuario = params.get("id")
 
 if id_usuario is None:
-    # --- TELA DE CADASTRO ---
     st.markdown("### Bem-vindo ao evento!")
-    with st.container():
-        nome = st.text_input("Digite seu nome para entrar na fila:")
-        if st.button("PEGAR MINHA SENHA"):
-            if nome.strip():
-                dados["senha_atual"] += 1
-                nova_senha = dados["senha_atual"]
-                dados["fila"].append({"nome": nome, "senha": nova_senha})
-                salvar_dados(dados)
-                # Define o ID na URL e recarrega
-                st.query_params["id"] = str(nova_senha)
-                st.rerun()
-            else:
-                st.warning("Por favor, preencha seu nome.")
-else:
-    # --- TELA DE ACOMPANHAMENTO ---
-    try:
-        minha_senha = int(id_usuario)
-        user_info = next((p for p in dados["fila"] if p["senha"] == minha_senha), None)
-        nome_cliente = user_info["nome"] if user_info else "Visitante"
-        
-        posicao = minha_senha - dados["chamados"]
-
-        if posicao > 10:
-            # Espera Normal
-            st.info(f"### Olá, {nome_cliente}!")
-            st.metric("Sua Senha", minha_senha)
-            st.metric("Pessoas na sua frente", posicao)
-            st.write("⏳ Você ainda tem tempo. Aproveite as outras atrações!")
-            
-        elif 1 <= posicao <= 10:
-            # Aviso de Proximidade (Aviso dos 10)
-            st.error(f"## 🏃‍♂️ {nome_cliente.upper()}, VENHA AGORA!")
-            st.markdown(f"### Você é o **{posicao}º** da fila.")
-            st.markdown("---")
-            st.markdown("### 📍 DIRIJA-SE AO LOCAL DO EVENTO IMEDIATAMENTE.")
-            st.balloons()
-
-        elif posicao == 0:
-            # Chegou a vez
-            st.success(f"## 🎉 {nome_cliente.upper()}, SUA VEZ!")
-            st.markdown("### 🟢 APRESENTE-SE NA ENTRADA.")
-            st.balloons()
-            
-        else:
-            # Já passou
-            st.warning("Sua senha já foi chamada ou é inválida.")
-            if st.button("Pegar Nova Senha"):
-                st.query_params.clear()
-                st.rerun()
-
-        # AUTO-REFRESH: Só acontece se o usuário estiver acompanhando a senha
-        time.sleep(10)
-        st.rerun()
-
-    except Exception as e:
-        st.error("Erro no link da senha.")
-        if st.button("Voltar ao Início"):
-            st.query_params.clear()
+    nome = st.text_input("Digite seu nome para entrar na fila:")
+    if st.button("PEGAR MINHA SENHA"):
+        if nome.strip():
+            dados["senha_atual"] += 1
+            nova_senha = dados["senha_atual"]
+            dados["fila"].append({"nome": nome, "senha": nova_senha})
+            salvar_dados(dados)
+            st.query_params["id"] = str(nova_senha)
             st.rerun()
+        else:
+            st.warning("Por favor,

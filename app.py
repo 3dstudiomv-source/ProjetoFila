@@ -2,7 +2,7 @@ import streamlit as st
 import json, os, time
 
 # 1. Configuração
-st.set_page_config(page_title="Perícia ao Alcance de todos", page_icon="🎫")
+st.set_page_config(page_title="Perícia ao Alcance de todos", page_icon="🔍")
 
 # 2. Funções de Dados
 def gerenciar_dados(acao="ler", info=None):
@@ -49,7 +49,7 @@ with st.sidebar:
                 st.rerun()
 
 # 5. Interface Principal
-st.title("🎫 Fila 3D Studio")
+st.title("🔍 Pericia ao Alcance de Todos")
 
 # SE NÃO TEM ID NA URL, MOSTRA CADASTRO
 if not id_cliente:

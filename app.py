@@ -97,17 +97,10 @@ else:
                 st.success("🎉 SUA VEZ, " + str(eu.get("n", "")).upper() + "!")
                 st.write("Apresente esta tela na recepção.")
                 st.balloons()
-            else:
-                st.warning("Sua senha já passou.")
-                if st.button("Pegar Nova Senha"):
-                    st.query_params.clear()
-                    st.session_state.clear()
-                    st.rerun()
-        
-        # Atualiza a cada 10 seg para o cliente
-        except:
-        st.query_params.clear()
+            # Código final do acompanhamento de senha
+        time.sleep(10)
         st.rerun()
-
-    time.sleep(10)
-    st.rerun()
+    except:
+        st.query_params.clear()
+        st.session_state.clear()
+        st.rerun()

@@ -56,4 +56,4 @@ with st.sidebar:
             st.text(str(p.get("s", "?")) + " - " + str(p.get("n", "Sem nome")))
             
         if st.button("RESETAR TUDO"):
-            if st.checkbox("Confirmar?
+            if st.checkbox("Confirmar?"):

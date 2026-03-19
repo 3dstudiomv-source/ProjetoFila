@@ -57,10 +57,4 @@ with st.sidebar:
             
         st.divider()
         st.subheader("📋 Próximos 10")
-        espera = [p for p in dados["fila"] if p["senha"] > atual][:10]
-        for p in espera:
-            st.info(f"**{p['senha']}°** - {p['nome']}")
-
-        if st.button("♻️ Resetar Sistema"):
-            if st.checkbox("Confirmar Reset?"):
-                salvar_dados({"fila": [], "senha_atual
+        espera = [p for p in dados["fila"] if

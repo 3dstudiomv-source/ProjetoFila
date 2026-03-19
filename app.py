@@ -57,4 +57,29 @@ with st.sidebar:
             
         st.divider()
         st.subheader("📋 Próximos 10")
-        espera = [p for p in dados["fila"] if
+        # LISTA REVISADA: Sem quebras de linha perigosas
+        espera = [p for p in dados["fila"] if p["senha"] > atual][:10]
+        
+        if espera:
+            for p in espera:
+                st.info(f"**{p['senha']}°** - {p['nome']}")
+        else:
+            st.write("Ninguém na fila.")
+
+        st.divider()
+        if st.button("♻️ Resetar Sistema"):
+            if st.checkbox("Confirmar Reset?"):
+                salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
+                st.query_params.clear()
+                st.session_state.clear()
+                st.rerun()
+    elif senha_adm != "":
+        st.error("Senha Incorreta")
+
+# 5. INTERFACE DO CLIENTE
+st.title("🎫 Fila Virtual 3D Studio")
+
+if id_na_url is None:
+    st.write("Pegue sua senha para o atendimento:")
+    nome_input = st.text_input("Seu Nome:")
+    if st.button("PEGAR MINHA SENHA", type

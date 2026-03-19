@@ -23,9 +23,8 @@ def salvar_dados(dados):
 
 dados = carregar_dados()
 
-# 3. LÓGICA DE MEMÓRIA (ID DA URL OU SESSÃO)
+# 3. LÓGICA DE MEMÓRIA (RECUPERAÇÃO DE SENHA)
 id_na_url = st.query_params.get("id")
-
 if id_na_url:
     st.session_state["meu_id"] = id_na_url
 elif "meu_id" in st.session_state:
@@ -57,7 +56,6 @@ with st.sidebar:
             
         st.divider()
         st.subheader("📋 Próximos 10")
-        # LISTA REVISADA: Sem quebras de linha perigosas
         espera = [p for p in dados["fila"] if p["senha"] > atual][:10]
         
         if espera:
@@ -66,7 +64,6 @@ with st.sidebar:
         else:
             st.write("Ninguém na fila.")
 
-        st.divider()
         if st.button("♻️ Resetar Sistema"):
             if st.checkbox("Confirmar Reset?"):
                 salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
@@ -79,7 +76,4 @@ with st.sidebar:
 # 5. INTERFACE DO CLIENTE
 st.title("🎫 Fila Virtual 3D Studio")
 
-if id_na_url is None:
-    st.write("Pegue sua senha para o atendimento:")
-    nome_input = st.text_input("Seu Nome:")
-    if st.button("PEGAR MINHA SENHA"), type
+if id_na_url

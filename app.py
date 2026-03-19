@@ -82,4 +82,4 @@ st.title("🎫 Fila Virtual 3D Studio")
 if id_na_url is None:
     st.write("Pegue sua senha para o atendimento:")
     nome_input = st.text_input("Seu Nome:")
-    if st.button("PEGAR MINHA SENHA", type
+    if st.button("PEGAR MINHA SENHA"), type

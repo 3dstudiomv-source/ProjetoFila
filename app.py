@@ -3,10 +3,10 @@ import json
 import os
 import time
 
-# 1. CONFIGURAÇÃO
+# 1. CONFIGURAÇÃO (Deve ser a primeira linha)
 st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫")
 
-# 2. FUNÇÕES DE DADOS
+# 2. FUNÇÕES DE DADOS (Persistência)
 def carregar_dados():
     default = {"fila": [], "senha_atual": 0, "chamados": 0}
     if not os.path.exists("dados_fila.json"):
@@ -23,7 +23,7 @@ def salvar_dados(dados):
 
 dados = carregar_dados()
 
-# 3. LÓGICA DE MEMÓRIA
+# 3. LÓGICA DE MEMÓRIA (Persistência no navegador)
 id_na_url = st.query_params.get("id")
 
 if id_na_url:
@@ -57,6 +57,7 @@ with st.sidebar:
             
         st.divider()
         st.subheader("📋 Próximos 10")
+        # Lista de espera filtrada e limitada a 10
         espera = [p for p in dados["fila"] if p["senha"] > atual][:10]
         
         if espera:
@@ -65,6 +66,7 @@ with st.sidebar:
         else:
             st.write("Ninguém na fila.")
 
+        st.divider()
         if st.button("♻️ Resetar Sistema"):
             if st.checkbox("Confirmar Reset?"):
                 salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
@@ -74,10 +76,17 @@ with st.sidebar:
     elif senha_adm != "":
         st.error("Senha Incorreta")
 
-# 5. INTERFACE DO CLIENTE
+# 5. INTERFACE DO CLIENTE (CENTRAL)
 st.title("🎫 Fila Virtual 3D Studio")
 
-# CORREÇÃO DA LINHA 79: Adicionado o ":" necessário
 if id_na_url is None:
+    # TELA DE CADASTRO
     st.write("Pegue sua senha para o atendimento:")
-    nome_input = st.text_input("
+    nome_input = st.text_input("Seu Nome:")
+    if st.button("PEGAR MINHA SENHA", type="primary"):
+        if nome_input.strip():
+            dados["senha_atual"] += 1
+            nova_s = dados["senha_atual"]
+            dados["fila"].append({"nome": nome_input, "senha": nova_s})
+            salvar_dados(dados)
+            st.query

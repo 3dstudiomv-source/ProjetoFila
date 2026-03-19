@@ -105,4 +105,9 @@ else:
                     st.rerun()
         
         # Atualiza a cada 10 seg para o cliente
-        time.sleep(10)
+        except:
+        st.query_params.clear()
+        st.rerun()
+
+    time.sleep(10)
+    st.rerun()

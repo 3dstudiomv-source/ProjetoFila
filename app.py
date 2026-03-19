@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-# 1. CONFIGURAÇÃO (Deve ser a primeira linha)
+# 1. CONFIGURAÇÃO
 st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫")
 
 # 2. FUNÇÕES DE DADOS
@@ -23,8 +23,9 @@ def salvar_dados(dados):
 
 dados = carregar_dados()
 
-# 3. LÓGICA DE MEMÓRIA (RECUPERAÇÃO DE SENHA)
+# 3. LÓGICA DE MEMÓRIA
 id_na_url = st.query_params.get("id")
+
 if id_na_url:
     st.session_state["meu_id"] = id_na_url
 elif "meu_id" in st.session_state:
@@ -76,4 +77,7 @@ with st.sidebar:
 # 5. INTERFACE DO CLIENTE
 st.title("🎫 Fila Virtual 3D Studio")
 
-if id_na_url
+# CORREÇÃO DA LINHA 79: Adicionado o ":" necessário
+if id_na_url is None:
+    st.write("Pegue sua senha para o atendimento:")
+    nome_input = st.text_input("

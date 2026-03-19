@@ -23,14 +23,11 @@ def salvar_dados(dados):
 
 dados = carregar_dados()
 
-# 3. LÓGICA DE MEMÓRIA (Persistence)
-# Tenta pegar o ID da URL
+# 3. LÓGICA DE MEMÓRIA (ID DA URL OU SESSÃO)
 id_na_url = st.query_params.get("id")
 
-# Se o ID está na URL, salvamos na "memória da sessão" para não perder
 if id_na_url:
     st.session_state["meu_id"] = id_na_url
-# Se o ID sumiu da URL, mas temos na memória da sessão, recuperamos
 elif "meu_id" in st.session_state:
     id_na_url = st.session_state["meu_id"]
 
@@ -66,29 +63,4 @@ with st.sidebar:
 
         if st.button("♻️ Resetar Sistema"):
             if st.checkbox("Confirmar Reset?"):
-                salvar_dados({"fila": [], "senha_atual": 0, "chamados": 0})
-                st.query_params.clear()
-                st.session_state.clear() # Limpa a memória também
-                st.rerun()
-
-# 5. INTERFACE DO CLIENTE
-st.title("🎫 Fila Virtual 3D Studio")
-
-if id_na_url is None:
-    # TELA DE CADASTRO
-    st.write("Pegue sua senha para o atendimento:")
-    nome_input = st.text_input("Seu Nome:")
-    if st.button("PEGAR MINHA SENHA", type="primary"):
-        if nome_input.strip():
-            dados["senha_atual"] += 1
-            nova_s = dados["senha_atual"]
-            dados["fila"].append({"nome": nome_input, "senha": nova_s})
-            salvar_dados(dados)
-            # Salva na URL e na Memória
-            st.query_params["id"] = str(nova_s)
-            st.session_state["meu_id"] = str(nova_s)
-            st.rerun()
-else:
-    # TELA DE ACOMPANHAMENTO
-    try:
-        minha_senha = int(id_na_url
+                salvar_dados({"fila": [], "senha_atual

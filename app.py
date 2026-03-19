@@ -63,10 +63,10 @@ with st.sidebar:
                 st.rerun()
 
 # 5. Interface Principal (Cliente)
-st.title("🔍 Fila 3D Studio")
+st.title("🔍 Perícia ao Alcance de todos")
 
 if not id_cliente:
-    st.subheader("Bem-vindo! Pegue sua senha:")
+    st.subheader("Bem-vindo, Perito(a)! Pegue sua senha:")
     nome = st.text_input("Seu Nome:")
     if st.button("GERAR MINHA SENHA", type="primary"):
         if nome.strip():
@@ -96,7 +96,7 @@ else:
                 st.subheader("APRESENTE ESTA TELA NA ENTRADA")
                 st.balloons()
             else:
-                st.warning("Sua senha já passou.")
+                st.warning("Sua senha já passou ou já foi chamada.")
                 if st.button("Pegar Nova Senha"):
                     st.query_params.clear()
                     st.rerun()

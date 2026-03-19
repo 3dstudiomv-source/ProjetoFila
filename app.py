@@ -1,106 +1,95 @@
 import streamlit as st
-import json, os, time
+import json
+import os
+import time
 
-# 1. Configuração de Página
-st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫")
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="Gestão de Fila Pro", page_icon="📊")
 
-# 2. Funções de Dados (Garante compatibilidade de versões)
-def gerenciar_dados(acao="ler", info=None):
-    arq = "dados_fila.json"
-    if acao == "ler":
-        default = {"fila": [], "atual": 0, "chamados": 0}
-        if not os.path.exists(arq): return default
-        try:
-            with open(arq, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if "senha_atual" in data: data["atual"] = data["senha_atual"]
-                for p in data.get("fila", []):
-                    if "senha" in p: p["s"] = p["senha"]
-                    if "nome" in p: p["n"] = p["nome"]
-                return data
-        except: return default
-    else:
-        with open(arq, "w", encoding="utf-8") as f:
-            json.dump(info, f, indent=4)
+def carregar_dados():
+    if os.path.exists("dados_fila.json"):
+        with open("dados_fila.json", "r") as f:
+            return json.load(f)
+    return {"fila": [], "senha_atual": 0, "chamados": 0}
 
-db = gerenciar_dados("ler")
+def salvar_dados(dados):
+    with open("dados_fila.json", "w") as f:
+        json.dump(dados, f)
 
-# 3. Lógica de Identificação
-u_id = st.query_params.get("id")
-if u_id: 
-    st.session_state["meu_id"] = u_id
-elif "meu_id" in st.session_state: 
-    u_id = st.session_state["meu_id"]
+dados = carregar_dados()
+params = st.query_params
+id_na_url = params.get("id")
 
-# 4. Painel Admin (Sidebar)
-with st.sidebar:
-    st.header("⚙️ Admin")
-    pw = st.text_input("Senha", type="password")
-    if pw == "01a02b03c0":
-        st.success("Acesso OK")
-        t_em = db.get("atual", 0)
-        t_ch = db.get("chamados", 0)
-        st.metric("Total", t_em)
-        st.metric("No Painel", t_ch)
-        if st.button("🔔 CHAMAR PRÓXIMO", type="primary"):
-            if t_ch < t_em:
-                db["chamados"] += 1
-                gerenciar_dados("salvar", db)
-                st.rerun()
-        st.divider()
-        st.write("PROXIMOS 10:")
-        lista = [p for p in db.get("fila", []) if p.get("s", 0) > t_ch][:10]
-        for p in lista:
-            st.text(str(p.get("s", "?")) + " - " + str(p.get("n", "Sem nome")))
-        if st.button("♻️ RESETAR TUDO"):
-            if st.checkbox("Confirmar reset?"):
-                gerenciar_dados("salvar", {"fila": [], "atual": 0, "chamados": 0})
-                st.query_params.clear()
-                st.session_state.clear()
-                st.rerun()
+# --- PAINEL ADMIN (Lateral) ---
+st.sidebar.header("⚙️ Painel de Controle")
+senha_input = st.sidebar.text_input("Senha de Acesso", type="password")
 
-# 5. Interface Principal (Cliente)
-st.title("🎫 Fila 3D Studio")
+# A nova senha que você solicitou
+if senha_input == "01a02b03c0":
+    st.sidebar.success("Acesso Autorizado")
+    
+    # Cálculos para as métricas
+    total_emitidas = dados["senha_atual"]
+    senha_no_painel = dados["chamados"]
+    em_espera = total_emitidas - senha_no_painel
+    
+    # Mostrando os dados de forma organizada
+    st.sidebar.divider()
+    col1, col2 = st.sidebar.columns(2)
+    col1.metric("Emitidas", total_emitidas)
+    col2.metric("Chamadas", senha_no_painel)
+    st.sidebar.metric("Aguardando agora", em_espera)
+    st.sidebar.divider()
 
-# SE NÃO HOUVER ID, MOSTRA O CADASTRO
-if u_id is None:
-    st.subheader("Bem-vindo! Pegue sua senha:")
-    nome_input = st.text_input("Seu Nome:")
-    if st.button("PEGAR MINHA SENHA", type="primary"):
-        if nome_input.strip():
-            db["atual"] += 1
-            n_s = db["atual"]
-            db["fila"].append({"n": nome_input, "s": n_s})
-            gerenciar_dados("salvar", db)
-            st.query_params["id"] = str(n_s)
-            st.session_state["meu_id"] = str(n_s)
+    if st.sidebar.button("🔔 CHAMAR PRÓXIMO", use_container_width=True):
+        if senha_no_painel < total_emitidas:
+            dados["chamados"] += 1
+            salvar_dados(dados)
             st.rerun()
         else:
-            st.warning("Por favor, digite seu nome.")
+            st.sidebar.warning("Não há ninguém na fila.")
 
-# SE HOUVER ID, MOSTRA A SENHA E STATUS
+    if st.sidebar.button("♻️ Resetar Sistema Completo"):
+        if st.sidebar.checkbox("Confirmar reset?"):
+            dados = {"fila": [], "senha_atual": 0, "chamados": 0}
+            salvar_dados(dados)
+            st.query_params.clear()
+            st.rerun()
 else:
-    try:
-        minha_s = int(u_id)
-        eu = next((p for p in db.get("fila", []) if p.get("s") == minha_s), None)
-        if eu:
-            pos = minha_s - db.get("chamados", 0)
-            if pos > 10:
-                st.info("Olá " + str(eu.get("n")) + "! Sua senha é: " + str(minha_s))
-                st.metric("Faltam", pos)
-                st.write("Pode passear, avisaremos quando estiver perto!")
-            elif 1 <= pos <= 10:
-                st.error("🏃 PREPARE-SE " + str(eu.get("n", "")).upper())
-                st.subheader("Você é o " + str(pos) + "º da fila. VÁ PARA A ENTRADA!")
-                st.balloons()
-            elif pos == 0:
-                st.success("🎉 SUA VEZ, " + str(eu.get("n", "")).upper() + "!")
-                st.write("Apresente esta tela na recepção.")
-                st.balloons()
-            # Código final do acompanhamento de senha
-        time.sleep(10)
-        st.rerun()
-    except:
-        st.query_params.clear()
-        st.session_state.clear()
-        st.rerun()
+    if senha_input != "":
+        st.sidebar.error("Senha Incorreta")
+
+# --- LÓGICA DO CLIENTE (Corpo Principal) ---
+st.title("🎫 Sistema de Fila")
+
+if not id_na_url:
+    st.header("📲 Pegar Senha")
+    nome = st.text_input("Seu nome:")
+    if st.button("Gerar Senha"):
+        if nome:
+            dados["senha_atual"] += 1
+            nova_senha = dados["senha_atual"]
+            dados["fila"].append({"nome": nome, "senha": nova_senha})
+            salvar_dados(dados)
+            st.query_params["id"] = nova_senha
+            st.rerun()
+else:
+    minha_senha = int(id_na_url)
+    faltam = minha_senha - dados["chamados"]
+
+    with st.container(border=True):
+        st.write(f"### Olá! Sua senha é: **{minha_senha}**")
+        if faltam > 0:
+            st.metric("Pessoas na sua frente", faltam)
+            st.info("Aguarde. Esta página atualiza automaticamente.")
+        elif faltam == 0:
+            st.success("🎉 SUA VEZ CHEGOU!")
+            st.balloons()
+        else:
+            st.error("❌ Sua vez já passou.")
+            if st.button("Pegar nova senha"):
+                st.query_params.clear()
+                st.rerun()
+
+    time.sleep(15)
+    st.rerun()

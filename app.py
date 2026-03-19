@@ -4,7 +4,7 @@ import json, os, time
 # 1. Configuração de Página
 st.set_page_config(page_title="Fila 3D Studio", page_icon="🎫")
 
-# 2. Funções de Dados com Proteção de Chaves
+# 2. Funções de Dados (Persistência no Arquivo)
 def carregar_dados():
     arq = "dados_fila.json"
     default = {"fila": [], "atual": 0, "chamados": 0}
@@ -12,7 +12,7 @@ def carregar_dados():
     try:
         with open(arq, "r", encoding="utf-8") as f:
             d = json.load(f)
-            # Proteção: Garante que as chaves existam mesmo se o JSON for antigo
+            # Normalização de chaves para evitar KeyError
             if "atual" not in d: d["atual"] = d.get("senha_atual", 0)
             if "chamados" not in d: d["chamados"] = 0
             if "fila" not in d: d["fila"] = []
@@ -25,10 +25,17 @@ def salvar_dados(d):
 
 db = carregar_dados()
 
-# 3. Lógica de Memória (URL/Sessão)
+# 3. LÓGICA DE SALVAMENTO NO NAVEGADOR (Persistência de Senha)
+# Tenta pegar o ID da URL primeiro
 u_id = st.query_params.get("id")
-if u_id: st.session_state["meu_id"] = u_id
-elif "meu_id" in st.session_state: u_id = st.session_state["meu_id"]
+
+# Se encontrou na URL, salva na memória da sessão
+if u_id:
+    st.session_state["meu_id"] = str(u_id)
+# Se não está na URL, mas está na sessão, recupera para a URL
+elif "meu_id" in st.session_state:
+    u_id = st.session_state["meu_id"]
+    st.query_params["id"] = str(u_id)
 
 # 4. Painel Lateral (Admin)
 with st.sidebar:
@@ -55,11 +62,11 @@ with st.sidebar:
                 st.session_state.clear()
                 st.rerun()
 
-# 5. Interface do Cliente (Onde os ícones aparecem)
+# 5. Interface do Cliente
 st.title("🎫 Fila 3D Studio")
 
 if u_id is None:
-    # TELA DE CADASTRO (Aparece se não tiver senha)
+    # TELA DE CADASTRO
     st.subheader("Olá! Pegue sua senha abaixo:")
     nome_input = st.text_input("Seu Nome:")
     if st.button("GERAR MINHA SENHA", type="primary"):
@@ -68,21 +75,21 @@ if u_id is None:
             n_s = db["atual"]
             db["fila"].append({"n": nome_input, "s": n_s})
             salvar_dados(db)
+            # SALVA NO NAVEGADOR (URL e Sessão)
             st.query_params["id"] = str(n_s)
             st.session_state["meu_id"] = str(n_s)
             st.rerun()
         else:
             st.warning("O nome é obrigatório.")
 else:
-    # TELA DE ACOMPANHAMENTO (Aparece se já tiver senha)
+    # TELA DE ACOMPANHAMENTO (A senha fica salva aqui)
     try:
         minha_s = int(u_id)
-        # Busca o usuário na lista
         eu = next((p for p in db["fila"] if p.get("s") == minha_s or p.get("senha") == minha_s), None)
         
         if eu:
             nome_cli = eu.get("n") or eu.get("nome", "Cliente")
-            pos = minha_s - db["chamados"]
+            pos = minha_s - db.get("chamados", 0)
             
             if pos > 0:
                 st.info("Olá " + str(nome_cli) + "! Sua senha é " + str(minha_s))
@@ -93,13 +100,16 @@ else:
                 st.balloons()
             else:
                 st.warning("Sua senha já passou.")
-                if st.button("Pegar Nova"):
+                if st.button("Pegar Nova Senha"):
                     st.query_params.clear()
                     st.session_state.clear()
                     st.rerun()
         
+        # Atualização automática para o cliente
         time.sleep(10)
         st.rerun()
     except:
+        # Se der erro no ID, limpa para permitir novo cadastro
         st.query_params.clear()
+        st.session_state.clear()
         st.rerun()

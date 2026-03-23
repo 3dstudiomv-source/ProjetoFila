@@ -247,6 +247,9 @@ if "inscrito" not in st.session_state:
     st.session_state.inscrito = None
     # {"dia": "...", "slot": "...", "nome": "..."}
 
+if "nome_confirmado" not in st.session_state:
+    st.session_state.nome_confirmado = None  # nome completo digitado pelo cliente
+
 if "confirmar_reset" not in st.session_state:
     st.session_state.confirmar_reset = False
 
@@ -373,21 +376,41 @@ if insc and insc.get("dia") == dia_ativo:
         st.session_state.inscrito = None
         st.info("Seu horário já passou. Você pode se inscrever em uma nova sessão.")
 
-# ── Formulário de inscrição ──
-st.markdown(f"**Evento:** {dia_ativo}  \n**Escolha seu horário e preencha seus dados.**")
+# ── ETAPA 1: Identificação ──
+if not st.session_state.nome_confirmado:
+    st.markdown("**Digite seu nome completo para começar:**")
+    col_nome, col_btn = st.columns([3, 1])
+    with col_nome:
+        nome_input = st.text_input(
+            "Nome e Sobrenome",
+            placeholder="Ex: Maria Silva",
+            label_visibility="collapsed"
+        )
+    with col_btn:
+        if st.button("Confirmar", type="primary", use_container_width=True):
+            partes = nome_input.strip().split()
+            if len(partes) < 2:
+                st.warning("⚠️ Digite nome e sobrenome.")
+            else:
+                st.session_state.nome_confirmado = nome_input.strip()
+                st.rerun()
+    st.stop()
+
+# ── ETAPA 2: Escolha de horário ──
+nome_completo = st.session_state.nome_confirmado
+partes = nome_completo.split()
+nome     = partes[0]
+sobrenome = " ".join(partes[1:])
+
+st.markdown(f"Olá, **{nome_completo}**! Escolha um horário:")
+if st.button("↩ Trocar nome", use_container_width=False):
+    st.session_state.nome_confirmado = None
+    st.rerun()
+
 st.divider()
-
-# Dados pessoais
-c1, c2 = st.columns(2)
-with c1:
-    nome = st.text_input("Nome *", placeholder="Ex: Maria")
-with c2:
-    sobrenome = st.text_input("Sobrenome *", placeholder="Ex: Silva")
-
 st.markdown("#### Horários disponíveis")
 
 sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
-
 slot_escolhido = None
 
 for slot in SLOTS:
@@ -395,7 +418,6 @@ for slot in SLOTS:
     vagas_livres = VAGAS_POR_SESSAO - len(inscritos)
     passado = slot < agora
 
-    # Classe visual
     if passado:
         classe_card = "slot-card slot-passado"
     else:
@@ -428,16 +450,13 @@ for slot in SLOTS:
 
 # ── Processar inscrição ──
 if slot_escolhido:
-    if not nome.strip() or not sobrenome.strip():
-        st.warning("⚠️ Preencha nome e sobrenome antes de reservar.")
+    sucesso, msg = inscrever(dia_ativo, slot_escolhido, nome, sobrenome)
+    if sucesso:
+        st.session_state.inscrito = {
+            "dia":  dia_ativo,
+            "slot": slot_escolhido,
+            "nome": nome_completo
+        }
+        st.rerun()
     else:
-        sucesso, msg = inscrever(dia_ativo, slot_escolhido, nome, sobrenome)
-        if sucesso:
-            st.session_state.inscrito = {
-                "dia":  dia_ativo,
-                "slot": slot_escolhido,
-                "nome": f"{nome.strip()} {sobrenome.strip()}"
-            }
-            st.rerun()
-        else:
-            st.error(f"❌ {msg}")
+        st.error(f"❌ {msg}")

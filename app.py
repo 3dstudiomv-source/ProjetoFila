@@ -4,273 +4,440 @@ import os
 import fcntl
 import logging
 from pathlib import Path
+from datetime import datetime, date, timedelta
 
 # ─────────────────────────────────────────────
-# CORREÇÃO 1: Configuração de logging adequado
+# Logging
 # ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("fila.log", encoding="utf-8"),
+        logging.FileHandler("checkin.log", encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-# 1. Configuração da página
+# Configuração da página
 # ─────────────────────────────────────────────
-st.set_page_config(page_title="Perícia ao Alcance de todos", page_icon="🔍")
+st.set_page_config(
+    page_title="Perícia ao Alcance de Todos",
+    page_icon="🔍",
+    layout="centered"
+)
 
 # ─────────────────────────────────────────────
-# CORREÇÃO 2: Auto-refresh sem bloquear worker
-# Substitui o time.sleep(10) + st.rerun() no
-# fluxo principal por um componente dedicado.
-# Instale: pip install streamlit-autorefresh
+# Auto-refresh (instale: pip install streamlit-autorefresh)
 # ─────────────────────────────────────────────
 try:
     from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=10_000, key="auto_refresh")
+    st_autorefresh(interval=30_000, key="auto_refresh")
 except ImportError:
-    logger.warning(
-        "streamlit-autorefresh não instalado. "
-        "Execute: pip install streamlit-autorefresh"
-    )
-    st.toast("⚠️ Auto-refresh indisponível. Instale streamlit-autorefresh.", icon="⚠️")
+    pass
 
 # ─────────────────────────────────────────────
-# 2. Funções de Dados com lock de arquivo
+# Constantes de horário
 # ─────────────────────────────────────────────
-ARQ = Path("dados_fila.json")
-DEFAULT_DB = {"fila": [], "atual": 0, "chamados": 0}
+HORA_INICIO = 10          # 10h
+HORA_FIM    = 20          # 20h (última sessão começa às 19h30)
+DURACAO_MIN = 30          # 30 minutos por sessão
+VAGAS_POR_SESSAO = 10
 
+def gerar_slots() -> list[str]:
+    """Gera lista de horários ex: ['10:00','10:30',...,'19:30']"""
+    slots = []
+    t = datetime.strptime(f"{HORA_INICIO:02d}:00", "%H:%M")
+    fim = datetime.strptime(f"{HORA_FIM:02d}:00", "%H:%M")
+    while t < fim:
+        slots.append(t.strftime("%H:%M"))
+        t += timedelta(minutes=DURACAO_MIN)
+    return slots
 
-def _ler_sem_lock() -> dict:
-    """Lê o JSON do disco (sem adquirir lock)."""
+SLOTS = gerar_slots()
+
+# ─────────────────────────────────────────────
+# Persistência — JSON com lock
+# ─────────────────────────────────────────────
+ARQ      = Path("dados_checkin.json")
+ARQ_LOCK = Path("dados_checkin.lock")
+
+DEFAULT_DB = {
+    "dia_ativo": None,        # "2024-06-15"
+    "sessoes": {}
+    # estrutura: { "2024-06-15": { "10:00": [{"nome":"...", "presente": false}, ...] } }
+}
+
+def _ler() -> dict:
     if not ARQ.exists():
         return dict(DEFAULT_DB)
     try:
         with ARQ.open("r", encoding="utf-8") as f:
-            d = json.load(f)
-        # Compatibilidade com versão antiga que usava "senha_atual"
-        if "atual" not in d:
-            d["atual"] = d.get("senha_atual", 0)
-        return d
+            return json.load(f)
     except (json.JSONDecodeError, IOError) as e:
-        logger.error("Erro ao ler dados_fila.json: %s", e)
+        logger.error("Erro ao ler JSON: %s", e)
         return dict(DEFAULT_DB)
 
-
-def _salvar_sem_lock(info: dict) -> None:
-    """Salva o JSON no disco (sem adquirir lock)."""
+def _salvar(data: dict) -> None:
     try:
         with ARQ.open("w", encoding="utf-8") as f:
-            json.dump(info, f, indent=4, ensure_ascii=False)
+            json.dump(data, f, indent=2, ensure_ascii=False)
     except IOError as e:
-        logger.error("Erro ao salvar dados_fila.json: %s", e)
+        logger.error("Erro ao salvar JSON: %s", e)
         raise
 
-
-# ─────────────────────────────────────────────
-# CORREÇÃO 3: Race condition — lock exclusivo
-# Todas as operações de leitura-modificação-
-# escrita são feitas dentro do mesmo lock.
-# ─────────────────────────────────────────────
-def gerar_senha(nome: str) -> int:
-    """Gera uma nova senha de forma atômica (thread/process-safe)."""
-    lock_path = Path("dados_fila.lock")
-    with lock_path.open("w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)        # bloqueia outros processos
-        try:
-            db = _ler_sem_lock()
-            db["atual"] += 1
-            nova = db["atual"]
-            db["fila"].append({"n": nome.strip(), "s": nova})
-            _salvar_sem_lock(db)
-            logger.info("Senha %d gerada para '%s'.", nova, nome.strip())
-            return nova
-        finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)    # libera o lock sempre
-
-
-def chamar_proximo(db: dict) -> dict:
-    """Chama a próxima senha de forma atômica."""
-    lock_path = Path("dados_fila.lock")
-    with lock_path.open("w") as lf:
+def com_lock(fn, *args, **kwargs):
+    """Executa fn dentro de lock exclusivo de arquivo."""
+    with ARQ_LOCK.open("w") as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
         try:
-            db = _ler_sem_lock()              # relê dentro do lock
-            if db["chamados"] < db["atual"]:
-                db["chamados"] += 1
-                _salvar_sem_lock(db)
-                logger.info("Senha %d chamada.", db["chamados"])
-            return db
+            return fn(*args, **kwargs)
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
+# ─────────────────────────────────────────────
+# Operações de negócio
+# ─────────────────────────────────────────────
+def inscrever(dia: str, slot: str, nome: str, sobrenome: str) -> tuple[bool, str]:
+    """
+    Tenta inscrever uma pessoa num slot. Retorna (sucesso, mensagem).
+    Executado dentro de lock.
+    """
+    def _op():
+        db = _ler()
+        sessoes_dia = db["sessoes"].setdefault(dia, {})
+        lista = sessoes_dia.setdefault(slot, [])
 
-def resetar_dados() -> None:
-    """Apaga todos os dados de forma atômica."""
-    lock_path = Path("dados_fila.lock")
-    with lock_path.open("w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
-        try:
-            _salvar_sem_lock(dict(DEFAULT_DB))
-            logger.info("Dados resetados.")
-        finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
+        # Verifica vagas
+        if len(lista) >= VAGAS_POR_SESSAO:
+            return False, "Este horário já está lotado."
 
+        nome_completo = f"{nome.strip()} {sobrenome.strip()}"
 
-def ler_dados() -> dict:
-    """Leitura simples (somente leitura não precisa de lock exclusivo)."""
-    return _ler_sem_lock()
+        # Verifica duplicata no mesmo slot
+        nomes_existentes = [p["nome"].lower() for p in lista]
+        if nome_completo.lower() in nomes_existentes:
+            return False, "Você já está inscrito neste horário."
 
+        lista.append({"nome": nome_completo, "presente": False})
+        _salvar(db)
+        logger.info("Inscrito: %s | %s | %s", dia, slot, nome_completo)
+        return True, "ok"
+
+    return com_lock(_op)
+
+def definir_dia_ativo(dia: str) -> None:
+    def _op():
+        db = _ler()
+        db["dia_ativo"] = dia
+        _salvar(db)
+        logger.info("Dia ativo definido: %s", dia)
+    com_lock(_op)
+
+def resetar_dia(dia: str) -> None:
+    def _op():
+        db = _ler()
+        db["sessoes"].pop(dia, None)
+        _salvar(db)
+        logger.info("Dia %s resetado.", dia)
+    com_lock(_op)
+
+def ler_db() -> dict:
+    return _ler()
 
 # ─────────────────────────────────────────────
-# 3. Leitura inicial do banco de dados
+# CSS customizado
 # ─────────────────────────────────────────────
-db = ler_dados()
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+}
+
+h1, h2, h3 {
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 800 !important;
+}
+
+.slot-card {
+    background: #0f1117;
+    border: 1.5px solid #2a2d3a;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: border-color 0.2s;
+}
+.slot-card:hover { border-color: #4f8ef7; }
+.slot-hora {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #e8eaf6;
+}
+.slot-vagas-ok  { color: #4caf7d; font-size: 0.85rem; font-weight: 500; }
+.slot-vagas-mid { color: #f0a500; font-size: 0.85rem; font-weight: 500; }
+.slot-vagas-no  { color: #e05c5c; font-size: 0.85rem; font-weight: 500; }
+.slot-passado   { opacity: 0.4; }
+
+.confirmacao-box {
+    background: linear-gradient(135deg, #1a2744 0%, #0f1117 100%);
+    border: 2px solid #4f8ef7;
+    border-radius: 16px;
+    padding: 28px 24px;
+    text-align: center;
+    margin-top: 20px;
+}
+.confirmacao-nome {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #e8eaf6;
+}
+.confirmacao-horario {
+    font-size: 3rem;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    color: #4f8ef7;
+    margin: 8px 0;
+}
+.confirmacao-data {
+    color: #8892b0;
+    font-size: 0.9rem;
+}
+
+.admin-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    background: #1a1d27;
+}
+.admin-nome { color: #e8eaf6; font-size: 0.95rem; }
+
+.badge-presente {
+    background: #1e4d35;
+    color: #4caf7d;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-ausente {
+    background: #2a2d3a;
+    color: #8892b0;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 4. Persistência de sessão via query params
+# Estado local da sessão
 # ─────────────────────────────────────────────
-id_cliente = st.query_params.get("id")
+if "inscrito" not in st.session_state:
+    st.session_state.inscrito = None
+    # {"dia": "...", "slot": "...", "nome": "..."}
+
+if "confirmar_reset" not in st.session_state:
+    st.session_state.confirmar_reset = False
 
 # ─────────────────────────────────────────────
-# 5. Painel Lateral (Admin)
+# Leitura do banco
+# ─────────────────────────────────────────────
+db = ler_db()
+dia_ativo = db.get("dia_ativo")
+
+# ─────────────────────────────────────────────
+# PAINEL ADMIN (sidebar)
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚙️ Admin")
+    st.markdown("### ⚙️ Admin")
 
-    # ─────────────────────────────────────────
-    # CORREÇÃO 4: Senha via st.secrets
-    # Crie .streamlit/secrets.toml com:
-    #   admin_pw = "sua_senha_segura"
-    # ─────────────────────────────────────────
     try:
         senha_correta = st.secrets["admin_pw"]
     except (KeyError, FileNotFoundError):
-        logger.warning(
-            "st.secrets['admin_pw'] não configurado. "
-            "Crie .streamlit/secrets.toml com admin_pw = 'sua_senha'."
+        senha_correta = "admin123"  # fallback para desenvolvimento
+        st.caption("⚠️ Configure secrets.toml em produção.")
+
+    pw = st.text_input("Senha", type="password", key="pw_admin")
+
+    if pw == senha_correta:
+        st.success("✅ Admin ativo")
+        st.divider()
+
+        # ── Definir dia ativo ──
+        st.markdown("**📅 Dia ativo**")
+        dia_input = st.date_input(
+            "Selecione o dia do evento",
+            value=date.fromisoformat(dia_ativo) if dia_ativo else date.today(),
+            key="dia_input"
         )
-        senha_correta = None
-        st.warning("⚠️ secrets.toml não configurado.")
+        if st.button("✅ Confirmar dia ativo", use_container_width=True):
+            definir_dia_ativo(dia_input.isoformat())
+            st.rerun()
 
-    pw = st.text_input("Senha", type="password")
-
-    if senha_correta and pw == senha_correta:
-        st.success("Admin Ativo")
-
-        t_inscritos = db.get("atual", 0)
-        t_chamados  = db.get("chamados", 0)
-        em_espera   = t_inscritos - t_chamados
-
-        st.metric("Total de Inscrições",    t_inscritos)
-        st.metric("Senha Atual no Painel",  t_chamados)
-        st.metric("Pessoas em Espera",      em_espera, delta_color="inverse")
+        if dia_ativo:
+            st.info(f"Dia ativo: **{dia_ativo}**")
 
         st.divider()
 
-        if st.button("🔔 CHAMAR PRÓXIMO", type="primary", use_container_width=True):
-            if t_chamados < t_inscritos:
-                db = chamar_proximo(db)
-                st.rerun()
+        # ── Lista de inscritos por horário ──
+        st.markdown("**📋 Inscritos por horário**")
+        if not dia_ativo:
+            st.warning("Nenhum dia ativo configurado.")
+        else:
+            sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
+            if not sessoes_dia:
+                st.info("Nenhuma inscrição ainda.")
             else:
-                st.info("Não há mais pessoas na fila.")
+                for slot in SLOTS:
+                    inscritos = sessoes_dia.get(slot, [])
+                    if not inscritos:
+                        continue
+                    st.markdown(f"**🕐 {slot}** — {len(inscritos)}/{VAGAS_POR_SESSAO} vagas")
+                    for p in inscritos:
+                        presente = p.get("presente", False)
+                        badge = '<span class="badge-presente">✓ presente</span>' if presente else '<span class="badge-ausente">aguardando</span>'
+                        st.markdown(
+                            f'<div class="admin-row">'
+                            f'<span class="admin-nome">👤 {p["nome"]}</span>'
+                            f'{badge}'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
 
         st.divider()
-        st.write("📋 PRÓXIMOS DA FILA:")
-        lista = [p for p in db.get("fila", []) if p.get("s", 0) > t_chamados][:10]
-        for p in lista:
-            st.text(f"{p.get('s')} - {p.get('n')}")
 
-        st.divider()
-
-        # ─────────────────────────────────────
-        # CORREÇÃO 5: Reset com session_state
-        # Evita o comportamento imprevisível do
-        # checkbox + button no mesmo ciclo.
-        # ─────────────────────────────────────
-        if "confirmar_reset" not in st.session_state:
-            st.session_state.confirmar_reset = False
-
+        # ── Reset ──
         if not st.session_state.confirmar_reset:
-            if st.button("♻️ RESET TOTAL", use_container_width=True):
+            if st.button("♻️ Resetar dia atual", use_container_width=True):
                 st.session_state.confirmar_reset = True
                 st.rerun()
         else:
-            st.error("⚠️ Isso apagará TODOS os dados!")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Confirmar", type="primary", use_container_width=True):
-                    resetar_dados()
+            st.error(f"Apagar todas inscrições de {dia_ativo}?")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Sim", type="primary", use_container_width=True):
+                    if dia_ativo:
+                        resetar_dia(dia_ativo)
                     st.session_state.confirmar_reset = False
-                    st.query_params.clear()
                     st.rerun()
-            with col2:
-                if st.button("❌ Cancelar", use_container_width=True):
+            with c2:
+                if st.button("❌ Não", use_container_width=True):
                     st.session_state.confirmar_reset = False
                     st.rerun()
 
 # ─────────────────────────────────────────────
-# 6. Interface Principal (Cliente)
+# INTERFACE CLIENTE
 # ─────────────────────────────────────────────
-st.title("🔍 Perícia ao Alcance de todos")
+st.markdown("## 🔍 Perícia ao Alcance de Todos")
 
-if not id_cliente:
-    st.subheader("Bem-vindo, Perito(a)! Pegue sua senha:")
-    nome = st.text_input("Seu Nome:")
+if not dia_ativo:
+    st.info("O evento ainda não foi configurado pelo organizador. Volte em breve!")
+    st.stop()
 
-    if st.button("GERAR MINHA SENHA", type="primary"):
-        if nome.strip():
-            # gerar_senha() já é atômico (usa lock internamente)
-            nova = gerar_senha(nome)
-            st.query_params["id"] = str(nova)
-            st.rerun()
-        else:
-            st.warning("Nome obrigatório.")
-else:
-    # ─────────────────────────────────────────
-    # CORREÇÃO 6: Exceções específicas + log
-    # ─────────────────────────────────────────
-    try:
-        minha_s = int(id_cliente)
-    except ValueError:
-        logger.warning("id_cliente inválido: '%s'", id_cliente)
-        st.query_params.clear()
-        st.rerun()
-        st.stop()
+# Verifica se a pessoa já está inscrita (no horário ainda válido)
+insc = st.session_state.inscrito
+agora = datetime.now().strftime("%H:%M")
 
-    try:
-        eu = next(
-            (p for p in db["fila"] if p.get("s") == minha_s or p.get("senha") == minha_s),
-            None
+if insc and insc.get("dia") == dia_ativo:
+    slot_inscrito = insc["slot"]
+    # Calcula fim do slot
+    t_slot = datetime.strptime(slot_inscrito, "%H:%M")
+    t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
+
+    if agora < t_fim.strftime("%H:%M"):
+        # Ainda no período válido — mostra confirmação
+        st.markdown(
+            f'<div class="confirmacao-box">'
+            f'<div class="confirmacao-data">📅 {dia_ativo} &nbsp;|&nbsp; sua reserva</div>'
+            f'<div class="confirmacao-nome">👤 {insc["nome"]}</div>'
+            f'<div class="confirmacao-horario">⏰ {slot_inscrito}</div>'
+            f'<div style="color:#8892b0;font-size:0.85rem;">Apresente esta tela ao chegar.<br>'
+            f'Diga seu nome ao organizador.</div>'
+            f'</div>',
+            unsafe_allow_html=True
         )
+        st.stop()
+    else:
+        # Horário já passou — libera nova inscrição
+        st.session_state.inscrito = None
+        st.info("Seu horário já passou. Você pode se inscrever em uma nova sessão.")
 
-        if eu:
-            nome_cli = eu.get("n") or eu.get("nome", "Cliente")
-            pos = minha_s - db.get("chamados", 0)
+# ── Formulário de inscrição ──
+st.markdown(f"**Evento:** {dia_ativo}  \n**Escolha seu horário e preencha seus dados.**")
+st.divider()
 
-            if pos > 0:
-                st.info(f"📍 Olá {nome_cli}! Sua senha é **{minha_s}**")
-                st.metric("Posição na Fila", f"{pos}º")
-            elif pos == 0:
-                st.success(f"🎉 SUA VEZ, {nome_cli.upper()}!")
-                st.subheader("APRESENTE ESTA TELA NA ENTRADA")
-                st.balloons()
-            else:
-                st.warning("Sua senha já passou ou já foi chamada.")
-                if st.button("Pegar Nova Senha"):
-                    st.query_params.clear()
-                    st.rerun()
-        else:
-            logger.warning("Senha %d não encontrada na fila.", minha_s)
-            st.query_params.clear()
+# Dados pessoais
+c1, c2 = st.columns(2)
+with c1:
+    nome = st.text_input("Nome *", placeholder="Ex: Maria")
+with c2:
+    sobrenome = st.text_input("Sobrenome *", placeholder="Ex: Silva")
+
+st.markdown("#### Horários disponíveis")
+
+sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
+
+slot_escolhido = None
+
+for slot in SLOTS:
+    inscritos = sessoes_dia.get(slot, [])
+    vagas_livres = VAGAS_POR_SESSAO - len(inscritos)
+    passado = slot < agora
+
+    # Classe visual
+    if passado:
+        classe_card = "slot-card slot-passado"
+    else:
+        classe_card = "slot-card"
+
+    if vagas_livres == 0:
+        classe_vagas = "slot-vagas-no"
+        txt_vagas = "Lotado"
+    elif vagas_livres <= 3:
+        classe_vagas = "slot-vagas-mid"
+        txt_vagas = f"{vagas_livres} vaga{'s' if vagas_livres > 1 else ''} restante{'s' if vagas_livres > 1 else ''}"
+    else:
+        classe_vagas = "slot-vagas-ok"
+        txt_vagas = f"{vagas_livres} vagas disponíveis"
+
+    col_info, col_btn = st.columns([3, 1])
+    with col_info:
+        st.markdown(
+            f'<div class="{classe_card}">'
+            f'<span class="slot-hora">🕐 {slot}</span>'
+            f'<span class="{classe_vagas}">{txt_vagas}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    with col_btn:
+        desabilitado = passado or vagas_livres == 0
+        label = "Lotado" if vagas_livres == 0 else ("Passado" if passado else "Reservar")
+        if st.button(label, key=f"btn_{slot}", disabled=desabilitado, use_container_width=True):
+            slot_escolhido = slot
+
+# ── Processar inscrição ──
+if slot_escolhido:
+    if not nome.strip() or not sobrenome.strip():
+        st.warning("⚠️ Preencha nome e sobrenome antes de reservar.")
+    else:
+        sucesso, msg = inscrever(dia_ativo, slot_escolhido, nome, sobrenome)
+        if sucesso:
+            st.session_state.inscrito = {
+                "dia":  dia_ativo,
+                "slot": slot_escolhido,
+                "nome": f"{nome.strip()} {sobrenome.strip()}"
+            }
             st.rerun()
-
-    except (KeyError, TypeError, StopIteration) as e:
-        logger.error("Erro inesperado na interface do cliente: %s", e)
-        st.query_params.clear()
-        st.rerun()
+        else:
+            st.error(f"❌ {msg}")

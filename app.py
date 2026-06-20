@@ -3,7 +3,6 @@ import json
 import os
 import logging
 import threading
-import base64
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -47,7 +46,7 @@ except ImportError:
     pass
 
 # ─────────────────────────────────────────────
-# Constantes de horário e Regra de Cotas Dinâmicas
+# Constantes de horário e Regra de Vagas (Cotas Dinâmicas)
 # ─────────────────────────────────────────────
 HORA_INICIO = 10          
 HORA_FIM    = 20          
@@ -112,9 +111,12 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> t
 
         total_inscritos = len(lista)
 
+        # 1. Validação de teto absoluto
         if total_inscritos >= VAGAS_TOTAL:
-            return False, "Este horário já está completely lotado."
+            return False, "Este horário já está completamente lotado."
 
+        # 2. Regra Dinâmica de Cotas:
+        # Se já existem 8 ou mais pessoas, as vagas restantes (9 e 10) são apenas para PCD.
         if total_inscritos >= (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) and not eh_pcd:
             return False, "As vagas gerais deste horário estão esgotadas. Restam apenas vagas exclusivas para PCD."
 
@@ -152,40 +154,17 @@ def resetar_dia(dia: str) -> None:
     com_lock(_op)
 
 # ─────────────────────────────────────────────
-# Injeção da Imagem de Fundo (Base64)
-# ─────────────────────────────────────────────
-def carregar_imagem_fundo(caminho_da_imagem):
-    try:
-        with open(caminho_da_imagem, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode()
-        return f"data:image/png;base64,{encoded_string}"
-    except FileNotFoundError:
-        return ""
-
-url_fundo = carregar_imagem_fundo("imagem.fundo.png")
-
-# ─────────────────────────────────────────────
 # CSS customizado
 # ─────────────────────────────────────────────
-st.markdown(f"""
+st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap');
 
-/* Configuração corrigida do Background para tirar o ZOOM */
-.stApp {{
-    background-image: url("{url_fundo}");
-    background-color: #0b0d13; /* Cor de fundo escura caso a imagem afaste demais nas bordas */
-    background-size: 100% 100%; /* Ajusta a imagem inteira nas dimensões da janela sem cortar */
-    background-position: center top;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-}}
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+h1, h2, h3, h4 { font-family: 'Syne', sans-serif !important; font-weight: 800 !important; }
 
-html, body, [class*="css"] {{ font-family: 'DM Sans', sans-serif; }}
-h1, h2, h3, h4 {{ font-family: 'Syne', sans-serif !important; font-weight: 800 !important; }}
-
-.slot-card {{
-    background: rgba(15, 17, 23, 0.88); 
+.slot-card {
+    background: #0f1117;
     border: 1.5px solid #2a2d3a;
     border-radius: 12px;
     padding: 16px 20px;
@@ -194,41 +173,39 @@ h1, h2, h3, h4 {{ font-family: 'Syne', sans-serif !important; font-weight: 800 !
     align-items: center;
     justify-content: space-between;
     transition: border-color 0.2s;
-    backdrop-filter: blur(6px);
-}}
-.slot-card:hover {{ border-color: #4f8ef7; }}
-.slot-hora {{ font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 700; color: #e8eaf6; }}
-.slot-vagas-ok  {{ color: #4caf7d; font-size: 0.85rem; font-weight: 500; }}
-.slot-vagas-mid {{ color: #f0a500; font-size: 0.85rem; font-weight: 500; }}
-.slot-vagas-no  {{ color: #e05c5c; font-size: 0.85rem; font-weight: 500; }}
-.slot-passado   {{ opacity: 0.4; }}
+}
+.slot-card:hover { border-color: #4f8ef7; }
+.slot-hora { font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 700; color: #e8eaf6; }
+.slot-vagas-ok  { color: #4caf7d; font-size: 0.85rem; font-weight: 500; }
+.slot-vagas-mid { color: #f0a500; font-size: 0.85rem; font-weight: 500; }
+.slot-vagas-no  { color: #e05c5c; font-size: 0.85rem; font-weight: 500; }
+.slot-passado   { opacity: 0.4; }
 
-.confirmacao-box {{
-    background: linear-gradient(135deg, rgba(26, 39, 68, 0.92) 0%, rgba(15, 17, 23, 0.92) 100%);
+.confirmacao-box {
+    background: linear-gradient(135deg, #1a2744 0%, #0f1117 100%);
     border: 2px solid #4f8ef7;
     border-radius: 16px;
     padding: 28px 24px;
     text-align: center;
     margin-top: 20px;
-    backdrop-filter: blur(6px);
-}}
-.confirmacao-nome {{ font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 800; color: #e8eaf6; }}
-.confirmacao-horario {{ font-size: 3rem; font-family: 'Syne', sans-serif; font-weight: 800; color: #4f8ef7; margin: 8px 0; }}
-.confirmacao-data {{ color: #8892b0; font-size: 0.9rem; }}
+}
+.confirmacao-nome { font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 800; color: #e8eaf6; }
+.confirmacao-horario { font-size: 3rem; font-family: 'Syne', sans-serif; font-weight: 800; color: #4f8ef7; margin: 8px 0; }
+.confirmacao-data { color: #8892b0; font-size: 0.9rem; }
 
-.admin-row {{
+.admin-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
     border-radius: 8px;
     margin-bottom: 6px;
-    background: rgba(26, 29, 39, 0.92);
-}}
-.admin-nome {{ color: #e8eaf6; font-size: 0.95rem; }}
-.badge-presente {{ background: #1e4d35; color: #4caf7d; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }}
-.badge-ausente {{ background: #2a2d3a; color: #8892b0; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; }}
-.badge-pcd {{ background: #1d3557; color: #a8dadc; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-left: 5px; }}
+    background: #1a1d27;
+}
+.admin-nome { color: #e8eaf6; font-size: 0.95rem; }
+.badge-presente { background: #1e4d35; color: #4caf7d; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge-ausente { background: #2a2d3a; color: #8892b0; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; }
+.badge-pcd { background: #1d3557; color: #a8dadc; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-left: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -413,10 +390,13 @@ for slot in SLOTS:
     else:
         classe_card = "slot-card"
         
+        # Lógica visual dinâmica das vagas:
         if eh_pcd_usuario:
+            # PCD enxerga todas as vagas livres que restarem no relógio
             vagas_visiveis = vagas_totais_livres
             desabilitado = (vagas_totais_livres == 0)
         else:
+            # Geral enxerga apenas o que sobrou antes da barreira das vagas reservadas
             vagas_visiveis = max(0, (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) - total_ocupado)
             desabilitado = (vagas_visiveis == 0)
 

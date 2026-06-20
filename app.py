@@ -235,3 +235,224 @@ dia_ativo = db.get("dia_ativo")
 # ─────────────────────────────────────────────
 # PAINEL ADMIN (sidebar)
 # ─────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Admin")
+    try:
+        senha_correta = st.secrets["admin_pw"]
+    except (KeyError, FileNotFoundError):
+        senha_correta = "admin123"  
+        st.caption("⚠️ Configure secrets.toml em produção.")
+
+    pw = st.text_input("Senha", type="password", key="pw_admin")
+
+    if pw == senha_correta:
+        st.success("✅ Admin ativo")
+        st.divider()
+
+        st.markdown("**📅 Dia ativo**")
+        try:
+            val_inicial = date.fromisoformat(dia_ativo) if dia_ativo else datetime.now(FUSO_BR).date()
+        except ValueError:
+            val_inicial = datetime.now(FUSO_BR).date()
+
+        dia_input = st.date_input("Selecione o dia do evento", value=val_inicial, key="dia_input")
+        if st.button("✅ Confirmar dia ativo", use_container_width=True):
+            definir_dia_ativo(dia_input.isoformat())
+            st.rerun()
+
+        if dia_ativo:
+            st.info(f"Dia ativo: **{dia_ativo}**")
+
+        st.divider()
+
+        st.markdown("**📋 Inscritos por horário**")
+        if not dia_ativo:
+            st.warning("Nenhum dia ativo configurado.")
+        else:
+            sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
+            if not sessoes_dia:
+                st.info("Nenhuma inscrição ainda.")
+            else:
+                for slot in SLOTS:
+                    inscritos = sessoes_dia.get(slot, [])
+                    if not inscritos:
+                        continue
+                    st.markdown(f"**🕐 {slot}** — {len(inscritos)}/{VAGAS_TOTAL} vagas")
+                    for p in inscritos:
+                        badge_presenca = '<span class="badge-presente">✓ presente</span>' if p.get("presente", False) else '<span class="badge-ausente">aguardando</span>'
+                        badge_pcd = '<span class="badge-pcd">PCD</span>' if p.get("pcd", False) else ''
+                        st.markdown(
+                            f'<div class="admin-row">'
+                            f'<span class="admin-nome">👤 {p["nome"]} {badge_pcd}</span>'
+                            f'{badge_presenca}'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+        st.divider()
+
+        if not st.session_state.confirmar_reset:
+            if st.button("♻️ Resetar dia atual", use_container_width=True):
+                st.session_state.confirmar_reset = True
+                st.rerun()
+        else:
+            st.error(f"Apagar todas inscrições de {dia_ativo}?")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Sim", type="primary", use_container_width=True):
+                    if dia_ativo:
+                        resetar_dia(dia_ativo)
+                    st.session_state.confirmar_reset = False
+                    st.rerun()
+            with c2:
+                if st.button("❌ Não", use_container_width=True):
+                    st.session_state.confirmar_reset = False
+                    st.rerun()
+
+# ─────────────────────────────────────────────
+# INTERFACE CLIENTE
+# ─────────────────────────────────────────────
+st.markdown("## 🔍 Perícia ao Alcance de Todos")
+
+if not dia_ativo:
+    st.info("O evento ainda não foi configurado pelo organizador. Volte em breve!")
+    st.stop()
+
+insc = st.session_state.inscrito
+agora = datetime.now(FUSO_BR).strftime("%H:%M")
+
+if insc and insc.get("dia") == dia_ativo:
+    slot_inscrito = insc["slot"]
+    t_slot = datetime.strptime(slot_inscrito, "%H:%M")
+    t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
+
+    if agora < t_fim.strftime("%H:%M"):
+        st.markdown(
+            f'<div class="confirmacao-box">'
+            f'<div class="confirmacao-data">📅 {dia_ativo} &nbsp;|&nbsp; sua reserva</div>'
+            f'<div class="confirmacao-nome">👤 {insc["nome"]}</div>'
+            f'<div class="confirmacao-horario">⏰ {slot_inscrito}</div>'
+            f'<div style="color:#8892b0;font-size:0.85rem;">Apresente esta tela ao chegar.<br>'
+            f'Diga seu nome ao organizador.</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        st.stop()
+    else:
+        st.session_state.inscrito = None
+        st.info("Seu horário já passou. Você pode se inscrever em uma nova sessão.")
+
+# ── ETAPA 1: Identificação ──
+if not st.session_state.nome_confirmado:
+    st.markdown("**Digite seus dados para começar:**")
+    
+    nome_input = st.text_input(
+        "Nome e Sobrenome",
+        placeholder="Ex: Maria Silva"
+    )
+    
+    # Caixa de seleção PCD inclusa na identificação
+    marcou_pcd = st.checkbox("Sou Pessoa com Deficiência (PCD) - Possui direito a cotas de horário.")
+    
+    if st.button("Confirmar Dados", type="primary", use_container_width=True):
+        partes = nome_input.strip().split()
+        if len(partes) < 2:
+            st.warning("⚠️ Digite nome e sobrenome.")
+        else:
+            st.session_state.nome_confirmado = nome_input.strip()
+            st.session_state.eh_pcd = marcou_pcd
+            st.rerun()
+    st.stop()
+
+# ── ETAPA 2: Escolha de horário ──
+nome_completo = st.session_state.nome_confirmado
+eh_pcd_usuario = st.session_state.eh_pcd
+partes = nome_completo.split()
+nome      = partes[0]
+sobrenome = " ".join(partes[1:])
+
+status_pcd_texto = " [PCD]" if eh_pcd_usuario else ""
+st.markdown(f"Olá, **{nome_completo}**{status_pcd_texto}! Escolha um horário:")
+if st.button("↩ Alterar cadastro", use_container_width=False):
+    st.session_state.nome_confirmado = None
+    st.session_state.eh_pcd = False
+    st.rerun()
+
+st.divider()
+st.markdown("#### Horários disponíveis")
+
+sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
+slot_escolhido = None
+
+for slot in SLOTS:
+    inscritos = sessoes_dia.get(slot, [])
+    
+    # Contabilização de vagas restantes baseadas no tipo de perfil
+    total_ocupado = len(inscritos)
+    pcd_ocupados = sum(1 for p in inscritos if p.get("pcd", False))
+    gerais_ocupados = total_ocupado - pcd_ocupados
+
+    vagas_pcd_restantes = max(0, VAGAS_PCD_EXCLUSIVAS - pcd_ocupados)
+    vagas_gerais_restantes = max(0, VAGAS_GERAIS - gerais_ocupados)
+    
+    # Vagas livres totais no relógio
+    vagas_totais_livres = VAGAS_TOTAL - total_ocupado
+    passado = slot < agora
+
+    # Define o bloqueio baseado nas regras de cota
+    if passado:
+        classe_card = "slot-card slot-passado"
+        desabilitado = True
+        label = "Passado"
+        txt_vagas = "Horário encerrado"
+        classe_vagas = "slot-vagas-no"
+    else:
+        classe_card = "slot-card"
+        
+        if eh_pcd_usuario:
+            # PCD pode ocupar qualquer vaga que sobrar no total
+            desabilitado = (vagas_totais_livres == 0)
+            vagas_visiveis = vagas_totais_livres
+        else:
+            # Geral só entra se a cota geral de 8 não estourou
+            desabilitado = (vagas_gerais_restantes == 0)
+            vagas_visiveis = vagas_gerais_restantes
+
+        if vagas_visiveis == 0:
+            classe_vagas = "slot-vagas-no"
+            txt_vagas = "Lotado"
+            label = "Lotado"
+        elif vagas_visiveis <= 2:
+            classe_vagas = "slot-vagas-mid"
+            txt_vagas = f"Últimas {vagas_visiveis} vaga{'s' if vagas_visiveis > 1 else ''}"
+            label = "Reservar"
+        else:
+            classe_vagas = "slot-vagas-ok"
+            txt_vagas = f"{vagas_visiveis} vaga{'s' if vagas_visiveis > 1 else ''} disponível{'s' if vagas_visiveis > 1 else ''}"
+            label = "Reservar"
+
+    col_info, col_btn = st.columns([3, 1])
+    with col_info:
+        st.markdown(
+            f'<div class="{classe_card}">'
+            f'<span class="slot-hora">🕐 {slot}</span>'
+            f'<span class="{classe_vagas}">{txt_vagas}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    with col_btn:
+        if st.button(label, key=f"btn_{slot}", disabled=desabilitado, use_container_width=True):
+            slot_escolhido = slot
+
+# ── Processar inscrição ──
+if slot_escolhido:
+    sucesso, msg = inscrever(dia_ativo, slot_escolhido, nome, sobrenome, eh_pcd_usuario)
+    if sucesso:
+        st.session_state.inscrito = {
+            "dia":  dia_ativo,
+            "slot": slot_escolhido,
+            "nome": nome_completo
+        }
+        st.rerun()
+    else:
+        st.error(f"❌ {msg}")

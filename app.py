@@ -5,6 +5,12 @@ import logging
 import threading
 from pathlib import Path
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo  # Nativo do Python 3.9+ para controle de fuso horário
+
+# ─────────────────────────────────────────────
+# Configuração do Fuso Horário Padrão (Brasília)
+# ─────────────────────────────────────────────
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
 
 # ─────────────────────────────────────────────
 # Logging & Concorrência Safe (Cross-platform)
@@ -264,10 +270,11 @@ with st.sidebar:
 
         st.markdown("**📅 Dia ativo**")
         
+        # Garante que a data inicial do admin respeite o fuso horário correto
         try:
-            val_inicial = date.fromisoformat(dia_ativo) if dia_ativo else date.today()
+            val_inicial = date.fromisoformat(dia_ativo) if dia_ativo else datetime.now(FUSO_BR).date()
         except ValueError:
-            val_inicial = date.today()
+            val_inicial = datetime.now(FUSO_BR).date()
 
         dia_input = st.date_input("Selecione o dia do evento", value=val_inicial, key="dia_input")
         if st.button("✅ Confirmar dia ativo", use_container_width=True):
@@ -333,7 +340,8 @@ if not dia_ativo:
     st.stop()
 
 insc = st.session_state.inscrito
-agora = datetime.now().strftime("%H:%M")
+# CORREÇÃO CRÍTICA: Captura a hora atual convertida explicitamente para o fuso do Brasil
+agora = datetime.now(FUSO_BR).strftime("%H:%M")
 
 if insc and insc.get("dia") == dia_ativo:
     slot_inscrito = insc["slot"]

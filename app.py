@@ -31,7 +31,7 @@ _db_lock = threading.Lock()
 # Configuração da página
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Perícia ao Alcance de Todos",
+    page_title="Perícia ao Alcance de Todos - Polícia Científica do RN",
     page_icon="🔍",
     layout="centered"
 )

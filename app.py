@@ -46,15 +46,14 @@ except ImportError:
     pass
 
 # ─────────────────────────────────────────────
-# Constantes de horário e Regra de Vagas (Cotas)
+# Constantes de horário e Regra de Vagas (Cotas Dinâmicas)
 # ─────────────────────────────────────────────
 HORA_INICIO = 10          
 HORA_FIM    = 20          
 DURACAO_MIN = 30          
 
 VAGAS_TOTAL = 10
-VAGAS_PCD_EXCLUSIVAS = 2  # 20% de 10
-VAGAS_GERAIS = 8          # 80% de 10
+VAGAS_RESERVADAS_PCD = 2  # As 2 últimas vagas do total de 10 são exclusivas
 
 def gerar_slots() -> list[str]:
     slots = []
@@ -110,23 +109,16 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> t
         sessoes_dia = db["sessoes"].setdefault(dia, {})
         lista = sessoes_dia.setdefault(slot, [])
 
-        # Contagem atual de ocupação
         total_inscritos = len(lista)
-        inscritos_pcd = sum(1 for p in lista if p.get("pcd", False))
-        inscritos_gerais = total_inscritos - inscritos_pcd
 
+        # 1. Validação de teto absoluto
         if total_inscritos >= VAGAS_TOTAL:
             return False, "Este horário já está completamente lotado."
 
-        # Regra de negócio para validação das vagas/cotas
-        if eh_pcd:
-            # PCDs têm direito a entrar enquanto houver vaga total, 
-            # ocupando primeiro as suas exclusivas e depois as gerais.
-            pass  
-        else:
-            # Usuário Geral só pode se inscrever se não tiver estourado o limite Geral (8)
-            if inscritos_gerais >= VAGAS_GERAIS:
-                return False, "Vagas gerais esgotadas. Restam apenas vagas exclusivas para PCD."
+        # 2. Regra Dinâmica de Cotas:
+        # Se já existem 8 ou mais pessoas, as vagas restantes (9 e 10) são apenas para PCD.
+        if total_inscritos >= (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) and not eh_pcd:
+            return False, "As vagas gerais deste horário estão esgotadas. Restam apenas vagas exclusivas para PCD."
 
         nome_completo = f"{nome.strip()} {sobrenome.strip()}"
         nomes_existentes = [p["nome"].lower() for p in lista]
@@ -351,7 +343,6 @@ if not st.session_state.nome_confirmado:
         placeholder="Ex: Maria Silva"
     )
     
-    # Caixa de seleção PCD inclusa na identificação
     marcou_pcd = st.checkbox("Sou Pessoa com Deficiência (PCD) - Possui direito a cotas de horário.")
     
     if st.button("Confirmar Dados", type="primary", use_container_width=True):
@@ -386,20 +377,10 @@ slot_escolhido = None
 
 for slot in SLOTS:
     inscritos = sessoes_dia.get(slot, [])
-    
-    # Contabilização de vagas restantes baseadas no tipo de perfil
     total_ocupado = len(inscritos)
-    pcd_ocupados = sum(1 for p in inscritos if p.get("pcd", False))
-    gerais_ocupados = total_ocupado - pcd_ocupados
-
-    vagas_pcd_restantes = max(0, VAGAS_PCD_EXCLUSIVAS - pcd_ocupados)
-    vagas_gerais_restantes = max(0, VAGAS_GERAIS - gerais_ocupados)
-    
-    # Vagas livres totais no relógio
     vagas_totais_livres = VAGAS_TOTAL - total_ocupado
     passado = slot < agora
 
-    # Define o bloqueio baseado nas regras de cota
     if passado:
         classe_card = "slot-card slot-passado"
         desabilitado = True
@@ -409,19 +390,24 @@ for slot in SLOTS:
     else:
         classe_card = "slot-card"
         
+        # Lógica visual dinâmica das vagas:
         if eh_pcd_usuario:
-            # PCD pode ocupar qualquer vaga que sobrar no total
-            desabilitado = (vagas_totais_livres == 0)
+            # PCD enxerga todas as vagas livres que restarem no relógio
             vagas_visiveis = vagas_totais_livres
+            desabilitado = (vagas_totais_livres == 0)
         else:
-            # Geral só entra se a cota geral de 8 não estourou
-            desabilitado = (vagas_gerais_restantes == 0)
-            vagas_visiveis = vagas_gerais_restantes
+            # Geral enxerga apenas o que sobrou antes da barreira das vagas reservadas
+            vagas_visiveis = max(0, (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) - total_ocupado)
+            desabilitado = (vagas_visiveis == 0)
 
-        if vagas_visiveis == 0:
+        if vagas_totais_livres == 0:
             classe_vagas = "slot-vagas-no"
             txt_vagas = "Lotado"
             label = "Lotado"
+        elif vagas_visiveis == 0 and not eh_pcd_usuario:
+            classe_vagas = "slot-vagas-no"
+            txt_vagas = "Restam apenas vagas PCD"
+            label = "Bloqueado"
         elif vagas_visiveis <= 2:
             classe_vagas = "slot-vagas-mid"
             txt_vagas = f"Últimas {vagas_visiveis} vaga{'s' if vagas_visiveis > 1 else ''}"

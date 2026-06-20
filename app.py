@@ -5,7 +5,7 @@ import logging
 import threading
 from pathlib import Path
 from datetime import datetime, date, timedelta
-from zoneinfo import ZoneInfo  # Nativo do Python 3.9+ para controle de fuso horário
+from zoneinfo import ZoneInfo
 
 # ─────────────────────────────────────────────
 # Configuração do Fuso Horário Padrão (Brasília)
@@ -25,7 +25,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Lock global para evitar colisões entre requisições simultâneas
 _db_lock = threading.Lock()
 
 # ─────────────────────────────────────────────
@@ -47,15 +46,17 @@ except ImportError:
     pass
 
 # ─────────────────────────────────────────────
-# Constantes de horário
+# Constantes de horário e Regra de Vagas (Cotas)
 # ─────────────────────────────────────────────
 HORA_INICIO = 10          
 HORA_FIM    = 20          
 DURACAO_MIN = 30          
-VAGAS_POR_SESSAO = 10
+
+VAGAS_TOTAL = 10
+VAGAS_PCD_EXCLUSIVAS = 2  # 20% de 10
+VAGAS_GERAIS = 8          # 80% de 10
 
 def gerar_slots() -> list[str]:
-    """Gera lista de horários ex: ['10:00','10:30',...,'19:30']"""
     slots = []
     t = datetime.strptime(f"{HORA_INICIO:02d}:00", "%H:%M")
     fim = datetime.strptime(f"{HORA_FIM:02d}:00", "%H:%M")
@@ -97,21 +98,35 @@ def _salvar(data: dict) -> None:
         raise
 
 def com_lock(fn, *args, **kwargs):
-    """Executa fn dentro de lock seguro para threads."""
     with _db_lock:
         return fn(*args, **kwargs)
 
 # ─────────────────────────────────────────────
 # Operações de negócio
 # ─────────────────────────────────────────────
-def inscrever(dia: str, slot: str, nome: str, sobrenome: str) -> tuple[bool, str]:
+def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> tuple[bool, str]:
     def _op():
         db = _ler()
         sessoes_dia = db["sessoes"].setdefault(dia, {})
         lista = sessoes_dia.setdefault(slot, [])
 
-        if len(lista) >= VAGAS_POR_SESSAO:
-            return False, "Este horário já está lotado."
+        # Contagem atual de ocupação
+        total_inscritos = len(lista)
+        inscritos_pcd = sum(1 for p in lista if p.get("pcd", False))
+        inscritos_gerais = total_inscritos - inscritos_pcd
+
+        if total_inscritos >= VAGAS_TOTAL:
+            return False, "Este horário já está completamente lotado."
+
+        # Regra de negócio para validação das vagas/cotas
+        if eh_pcd:
+            # PCDs têm direito a entrar enquanto houver vaga total, 
+            # ocupando primeiro as suas exclusivas e depois as gerais.
+            pass  
+        else:
+            # Usuário Geral só pode se inscrever se não tiver estourado o limite Geral (8)
+            if inscritos_gerais >= VAGAS_GERAIS:
+                return False, "Vagas gerais esgotadas. Restam apenas vagas exclusivas para PCD."
 
         nome_completo = f"{nome.strip()} {sobrenome.strip()}"
         nomes_existentes = [p["nome"].lower() for p in lista]
@@ -119,9 +134,13 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str) -> tuple[bool, str
         if nome_completo.lower() in nomes_existentes:
             return False, "Você já está inscrito neste horário."
 
-        lista.append({"nome": nome_completo, "presente": False})
+        lista.append({
+            "nome": nome_completo, 
+            "presente": False,
+            "pcd": eh_pcd
+        })
         _salvar(db)
-        logger.info("Inscrito: %s | %s | %s", dia, slot, nome_completo)
+        logger.info("Inscrito: %s | %s | %s | PCD: %s", dia, slot, nome_completo, eh_pcd)
         return True, "ok"
 
     return com_lock(_op)
@@ -149,14 +168,8 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-}
-
-h1, h2, h3, h4 {
-    font-family: 'Syne', sans-serif !important;
-    font-weight: 800 !important;
-}
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+h1, h2, h3, h4 { font-family: 'Syne', sans-serif !important; font-weight: 800 !important; }
 
 .slot-card {
     background: #0f1117;
@@ -170,12 +183,7 @@ h1, h2, h3, h4 {
     transition: border-color 0.2s;
 }
 .slot-card:hover { border-color: #4f8ef7; }
-.slot-hora {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: #e8eaf6;
-}
+.slot-hora { font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 700; color: #e8eaf6; }
 .slot-vagas-ok  { color: #4caf7d; font-size: 0.85rem; font-weight: 500; }
 .slot-vagas-mid { color: #f0a500; font-size: 0.85rem; font-weight: 500; }
 .slot-vagas-no  { color: #e05c5c; font-size: 0.85rem; font-weight: 500; }
@@ -189,23 +197,9 @@ h1, h2, h3, h4 {
     text-align: center;
     margin-top: 20px;
 }
-.confirmacao-nome {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.6rem;
-    font-weight: 800;
-    color: #e8eaf6;
-}
-.confirmacao-horario {
-    font-size: 3rem;
-    font-family: 'Syne', sans-serif;
-    font-weight: 800;
-    color: #4f8ef7;
-    margin: 8px 0;
-}
-.confirmacao-data {
-    color: #8892b0;
-    font-size: 0.9rem;
-}
+.confirmacao-nome { font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 800; color: #e8eaf6; }
+.confirmacao-horario { font-size: 3rem; font-family: 'Syne', sans-serif; font-weight: 800; color: #4f8ef7; margin: 8px 0; }
+.confirmacao-data { color: #8892b0; font-size: 0.9rem; }
 
 .admin-row {
     display: flex;
@@ -217,22 +211,9 @@ h1, h2, h3, h4 {
     background: #1a1d27;
 }
 .admin-nome { color: #e8eaf6; font-size: 0.95rem; }
-
-.badge-presente {
-    background: #1e4d35;
-    color: #4caf7d;
-    padding: 2px 10px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-.badge-ausente {
-    background: #2a2d3a;
-    color: #8892b0;
-    padding: 2px 10px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-}
+.badge-presente { background: #1e4d35; color: #4caf7d; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge-ausente { background: #2a2d3a; color: #8892b0; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; }
+.badge-pcd { background: #1d3557; color: #a8dadc; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-left: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -243,208 +224,14 @@ if "inscrito" not in st.session_state:
     st.session_state.inscrito = None
 if "nome_confirmado" not in st.session_state:
     st.session_state.nome_confirmado = None  
+if "eh_pcd" not in st.session_state:
+    st.session_state.eh_pcd = False
 if "confirmar_reset" not in st.session_state:
     st.session_state.confirmar_reset = False
 
-# Leitura isolada usando o lock seguro
 db = com_lock(_ler)
 dia_ativo = db.get("dia_ativo")
 
 # ─────────────────────────────────────────────
 # PAINEL ADMIN (sidebar)
 # ─────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ Admin")
-
-    try:
-        senha_correta = st.secrets["admin_pw"]
-    except (KeyError, FileNotFoundError):
-        senha_correta = "admin123"  
-        st.caption("⚠️ Configure secrets.toml em produção.")
-
-    pw = st.text_input("Senha", type="password", key="pw_admin")
-
-    if pw == senha_correta:
-        st.success("✅ Admin ativo")
-        st.divider()
-
-        st.markdown("**📅 Dia ativo**")
-        
-        # Garante que a data inicial do admin respeite o fuso horário correto
-        try:
-            val_inicial = date.fromisoformat(dia_ativo) if dia_ativo else datetime.now(FUSO_BR).date()
-        except ValueError:
-            val_inicial = datetime.now(FUSO_BR).date()
-
-        dia_input = st.date_input("Selecione o dia do evento", value=val_inicial, key="dia_input")
-        if st.button("✅ Confirmar dia ativo", use_container_width=True):
-            definir_dia_ativo(dia_input.isoformat())
-            st.rerun()
-
-        if dia_ativo:
-            st.info(f"Dia ativo: **{dia_ativo}**")
-
-        st.divider()
-
-        st.markdown("**📋 Inscritos por horário**")
-        if not dia_ativo:
-            st.warning("Nenhum dia ativo configurado.")
-        else:
-            sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
-            if not sessoes_dia:
-                st.info("Nenhuma inscrição ainda.")
-            else:
-                for slot in SLOTS:
-                    inscritos = sessoes_dia.get(slot, [])
-                    if not inscritos:
-                        continue
-                    st.markdown(f"**🕐 {slot}** — {len(inscritos)}/{VAGAS_POR_SESSAO} vagas")
-                    for p in inscritos:
-                        presente = p.get("presente", False)
-                        badge = '<span class="badge-presente">✓ presente</span>' if presente else '<span class="badge-ausente">aguardando</span>'
-                        st.markdown(
-                            f'<div class="admin-row">'
-                            f'<span class="admin-nome">👤 {p["nome"]}</span>'
-                            f'{badge}'
-                            f'</div>',
-                            unsafe_allow_html=True
-                        )
-
-        st.divider()
-
-        if not st.session_state.confirmar_reset:
-            if st.button("♻️ Resetar dia atual", use_container_width=True):
-                st.session_state.confirmar_reset = True
-                st.rerun()
-        else:
-            st.error(f"Apagar todas inscrições de {dia_ativo}?")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("✅ Sim", type="primary", use_container_width=True):
-                    if dia_ativo:
-                        resetar_dia(dia_ativo)
-                    st.session_state.confirmar_reset = False
-                    st.rerun()
-            with c2:
-                if st.button("❌ Não", use_container_width=True):
-                    st.session_state.confirmar_reset = False
-                    st.rerun()
-
-# ─────────────────────────────────────────────
-# INTERFACE CLIENTE
-# ─────────────────────────────────────────────
-st.markdown("## 🔍 Perícia ao Alcance de Todos")
-
-if not dia_ativo:
-    st.info("O evento ainda não foi configurado pelo organizador. Volte em breve!")
-    st.stop()
-
-insc = st.session_state.inscrito
-# CORREÇÃO CRÍTICA: Captura a hora atual convertida explicitamente para o fuso do Brasil
-agora = datetime.now(FUSO_BR).strftime("%H:%M")
-
-if insc and insc.get("dia") == dia_ativo:
-    slot_inscrito = insc["slot"]
-    t_slot = datetime.strptime(slot_inscrito, "%H:%M")
-    t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
-
-    if agora < t_fim.strftime("%H:%M"):
-        st.markdown(
-            f'<div class="confirmacao-box">'
-            f'<div class="confirmacao-data">📅 {dia_ativo} &nbsp;|&nbsp; sua reserva</div>'
-            f'<div class="confirmacao-nome">👤 {insc["nome"]}</div>'
-            f'<div class="confirmacao-horario">⏰ {slot_inscrito}</div>'
-            f'<div style="color:#8892b0;font-size:0.85rem;">Apresente esta tela ao chegar.<br>'
-            f'Diga seu nome ao organizador.</div>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-        st.stop()
-    else:
-        st.session_state.inscrito = None
-        st.info("Seu horário já passou. Você pode se inscrever em uma nova sessão.")
-
-# ── ETAPA 1: Identificação ──
-if not st.session_state.nome_confirmado:
-    st.markdown("**Digite seu nome completo para começar:**")
-    col_nome, col_btn = st.columns([3, 1])
-    with col_nome:
-        nome_input = st.text_input(
-            "Nome e Sobrenome",
-            placeholder="Ex: Maria Silva",
-            label_visibility="collapsed"
-        )
-    with col_btn:
-        if st.button("Confirmar", type="primary", use_container_width=True):
-            partes = nome_input.strip().split()
-            if len(partes) < 2:
-                st.warning("⚠️ Digite nome e sobrenome.")
-            else:
-                st.session_state.nome_confirmado = nome_input.strip()
-                st.rerun()
-    st.stop()
-
-# ── ETAPA 2: Escolha de horário ──
-nome_completo = st.session_state.nome_confirmado
-partes = nome_completo.split()
-nome      = partes[0]
-sobrenome = " ".join(partes[1:])
-
-st.markdown(f"Olá, **{nome_completo}**! Escolha um horário:")
-if st.button("↩ Trocar nome", use_container_width=False):
-    st.session_state.nome_confirmado = None
-    st.rerun()
-
-st.divider()
-st.markdown("#### Horários disponíveis")
-
-sessoes_dia = db.get("sessoes", {}).get(dia_ativo, {})
-slot_escolhido = None
-
-for slot in SLOTS:
-    inscritos = sessoes_dia.get(slot, [])
-    vagas_livres = VAGAS_POR_SESSAO - len(inscritos)
-    passado = slot < agora
-
-    if passado:
-        classe_card = "slot-card slot-passado"
-    else:
-        classe_card = "slot-card"
-
-    if vagas_livres == 0:
-        classe_vagas = "slot-vagas-no"
-        txt_vagas = "Lotado"
-    elif vagas_livres <= 3:
-        classe_vagas = "slot-vagas-mid"
-        txt_vagas = f"{vagas_livres} vaga{'s' if vagas_livres > 1 else ''} restante{'s' if vagas_livres > 1 else ''}"
-    else:
-        classe_vagas = "slot-vagas-ok"
-        txt_vagas = f"{vagas_livres} vagas disponíveis"
-
-    col_info, col_btn = st.columns([3, 1])
-    with col_info:
-        st.markdown(
-            f'<div class="{classe_card}">'
-            f'<span class="slot-hora">🕐 {slot}</span>'
-            f'<span class="{classe_vagas}">{txt_vagas}</span>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-    with col_btn:
-        desabilitado = passado or vagas_livres == 0
-        label = "Lotado" if vagas_livres == 0 else ("Passado" if passado else "Reservar")
-        if st.button(label, key=f"btn_{slot}", disabled=desabilitado, use_container_width=True):
-            slot_escolhido = slot
-
-# ── Processar inscrição ──
-if slot_escolhido:
-    sucesso, msg = inscrever(dia_ativo, slot_escolhido, nome, sobrenome)
-    if sucesso:
-        st.session_state.inscrito = {
-            "dia":  dia_ativo,
-            "slot": slot_escolhido,
-            "nome": nome_completo
-        }
-        st.rerun()
-    else:
-        st.error(f"❌ {msg}")

@@ -112,11 +112,9 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> t
 
         total_inscritos = len(lista)
 
-        # 1. Validação de teto absoluto
         if total_inscritos >= VAGAS_TOTAL:
-            return False, "Este horário já está completamente lotado."
+            return False, "Este horário já está completely lotado."
 
-        # 2. Regra Dinâmica de Cotas:
         if total_inscritos >= (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) and not eh_pcd:
             return False, "As vagas gerais deste horário estão esgotadas. Restam apenas vagas exclusivas para PCD."
 
@@ -162,7 +160,6 @@ def carregar_imagem_fundo(caminho_da_imagem):
             encoded_string = base64.b64encode(image_file.read()).decode()
         return f"data:image/png;base64,{encoded_string}"
     except FileNotFoundError:
-        # Retorna vazio para não quebrar a aplicação caso a imagem falhe ao carregar localmente
         return ""
 
 url_fundo = carregar_imagem_fundo("imagem.fundo.png")
@@ -174,11 +171,12 @@ st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap');
 
-/* Configuração do Background na aplicação */
+/* Configuração corrigida do Background para tirar o ZOOM */
 .stApp {{
     background-image: url("{url_fundo}");
-    background-size: cover;
-    background-position: center;
+    background-color: #0b0d13; /* Cor de fundo escura caso a imagem afaste demais nas bordas */
+    background-size: 100% 100%; /* Ajusta a imagem inteira nas dimensões da janela sem cortar */
+    background-position: center top;
     background-repeat: no-repeat;
     background-attachment: fixed;
 }}
@@ -187,7 +185,7 @@ html, body, [class*="css"] {{ font-family: 'DM Sans', sans-serif; }}
 h1, h2, h3, h4 {{ font-family: 'Syne', sans-serif !important; font-weight: 800 !important; }}
 
 .slot-card {{
-    background: rgba(15, 17, 23, 0.85); /* Fundo translúcido para exibir o background sutilmente */
+    background: rgba(15, 17, 23, 0.88); 
     border: 1.5px solid #2a2d3a;
     border-radius: 12px;
     padding: 16px 20px;
@@ -196,7 +194,7 @@ h1, h2, h3, h4 {{ font-family: 'Syne', sans-serif !important; font-weight: 800 !
     align-items: center;
     justify-content: space-between;
     transition: border-color 0.2s;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(6px);
 }}
 .slot-card:hover {{ border-color: #4f8ef7; }}
 .slot-hora {{ font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 700; color: #e8eaf6; }}
@@ -206,13 +204,13 @@ h1, h2, h3, h4 {{ font-family: 'Syne', sans-serif !important; font-weight: 800 !
 .slot-passado   {{ opacity: 0.4; }}
 
 .confirmacao-box {{
-    background: linear-gradient(135deg, rgba(26, 39, 68, 0.9) 0%, rgba(15, 17, 23, 0.9) 100%);
+    background: linear-gradient(135deg, rgba(26, 39, 68, 0.92) 0%, rgba(15, 17, 23, 0.92) 100%);
     border: 2px solid #4f8ef7;
     border-radius: 16px;
     padding: 28px 24px;
     text-align: center;
     margin-top: 20px;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(6px);
 }}
 .confirmacao-nome {{ font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 800; color: #e8eaf6; }}
 .confirmacao-horario {{ font-size: 3rem; font-family: 'Syne', sans-serif; font-weight: 800; color: #4f8ef7; margin: 8px 0; }}
@@ -225,7 +223,7 @@ h1, h2, h3, h4 {{ font-family: 'Syne', sans-serif !important; font-weight: 800 !
     padding: 10px 14px;
     border-radius: 8px;
     margin-bottom: 6px;
-    background: rgba(26, 29, 39, 0.9);
+    background: rgba(26, 29, 39, 0.92);
 }}
 .admin-nome {{ color: #e8eaf6; font-size: 0.95rem; }}
 .badge-presente {{ background: #1e4d35; color: #4caf7d; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }}

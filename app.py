@@ -116,7 +116,6 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> t
             return False, "Este horário já está completamente lotado."
 
         # 2. Regra Dinâmica de Cotas:
-        # Se já existem 8 ou mais pessoas, as vagas restantes (9 e 10) são apenas para PCD.
         if total_inscritos >= (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) and not eh_pcd:
             return False, "As vagas gerais deste horário estão esgotadas. Restam apenas vagas exclusivas para PCD."
 
@@ -133,6 +132,26 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> t
         })
         _salvar(db)
         logger.info("Inscrito: %s | %s | %s | PCD: %s", dia, slot, nome_completo, eh_pcd)
+        return True, "ok"
+
+    return com_lock(_op)
+
+def remover_inscricao(dia: str, slot: str, nome_completo: str) -> tuple[bool, str]:
+    """Remove o usuário da lista, liberando a vaga de volta."""
+    def _op():
+        db = _ler()
+        sessoes_dia = db.get("sessoes", {}).get(dia, {})
+        lista = sessoes_dia.get(slot, [])
+        
+        # Filtra removendo o usuário da lista pelo nome completo
+        nova_lista = [p for p in lista if p["nome"].lower() != nome_completo.lower()]
+        
+        if len(nova_lista) == len(lista):
+            return False, "Inscrição não encontrada no sistema."
+            
+        db["sessoes"][dia][slot] = nova_lista
+        _salvar(db)
+        logger.info("Inscrição removida: %s | %s | %s", dia, slot, nome_completo)
         return True, "ok"
 
     return com_lock(_op)
@@ -329,6 +348,17 @@ if insc and insc.get("dia") == dia_ativo:
             f'</div>',
             unsafe_allow_html=True
         )
+        
+        # ── NOVO: Botão para Sair da Fila ──
+        st.write("") # Pequeno espaçamento visual
+        if st.button("❌ Sair desta fila / Mudar horário", use_container_width=True):
+            sucesso, msg = remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
+            if sucesso:
+                st.session_state.inscrito = None  # Limpa o estado para liberar a escolha
+                st.rerun()
+            else:
+                st.error(f"Erro ao cancelar: {msg}")
+                
         st.stop()
     else:
         st.session_state.inscrito = None
@@ -390,13 +420,10 @@ for slot in SLOTS:
     else:
         classe_card = "slot-card"
         
-        # Lógica visual dinâmica das vagas:
         if eh_pcd_usuario:
-            # PCD enxerga todas as vagas livres que restarem no relógio
             vagas_visiveis = vagas_totais_livres
             desabilitado = (vagas_totais_livres == 0)
         else:
-            # Geral enxerga apenas o que sobrou antes da barreira das vagas reservadas
             vagas_visiveis = max(0, (VAGAS_TOTAL - VAGAS_RESERVADAS_PCD) - total_ocupado)
             desabilitado = (vagas_visiveis == 0)
 

@@ -156,7 +156,7 @@ def remover_inscricao(dia: str, slot: str, nome_completo: str) -> tuple[bool, st
 
 def buscar_inscricao_por_nome(dia: str, nome_completo: str) -> dict | None:
     """Busca no JSON se o nome completo já possui um agendamento no dia ativo."""
-    if not dia:
+    if not dia or not nome_completo:
         return None
     db = _ler()
     sessoes_dia = db.get("sessoes", {}).get(dia, {})
@@ -241,15 +241,19 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif !important; font-weight: 800 !i
 # ─────────────────────────────────────────────
 # Estado local da sessão
 # ─────────────────────────────────────────────
-if "nome_confirmado" not in st.session_state:
-    st.session_state.nome_confirmado = None  
-if "eh_pcd" not in st.session_state:
-    st.session_state.eh_pcd = False
 if "confirmar_reset" not in st.session_state:
     st.session_state.confirmar_reset = False
 
 db = com_lock(_ler)
 dia_ativo = db.get("dia_ativo")
+
+# Recarrega dados guardados na URL para garantir persistência mesmo após o F5
+url_user = st.query_params.get("user")
+url_pcd = st.query_params.get("pcd") == "true"
+
+if url_user and "nome_confirmado" not in st.session_state:
+    st.session_state.nome_confirmado = url_user
+    st.session_state.eh_pcd = url_pcd
 
 # ─────────────────────────────────────────────
 # PAINEL ADMIN (sidebar)
@@ -339,7 +343,7 @@ if not dia_ativo:
 
 agora = datetime.now(FUSO_BR).strftime("%H:%M")
 
-# ── ETAPA 1: Identificação (Se não houver nome na sessão atual) ──
+# ── ETAPA 1: Identificação (Se não houver nome na sessão atual nem na URL) ──
 nome_confirmado_atual = st.session_state.get("nome_confirmado")
 
 if not nome_confirmado_atual:
@@ -360,20 +364,22 @@ if not nome_confirmado_atual:
             nome_limpo = f"{partes[0].strip()} {' '.join(partes[1:]).strip()}"
             st.session_state.nome_confirmado = nome_limpo
             
-            # Busca persistente: se o nome já estiver no JSON, puxa o status PCD de lá
             inscricao_existente = buscar_inscricao_por_nome(dia_ativo, nome_limpo)
             if inscricao_existente:
                 st.session_state.eh_pcd = inscricao_existente["pcd"]
             else:
                 st.session_state.eh_pcd = marcou_pcd
+                
+            # Salva os parâmetros na URL para sobreviver ao F5
+            st.query_params["user"] = nome_limpo
+            st.query_params["pcd"] = "true" if st.session_state.eh_pcd else "false"
             st.rerun()
     st.stop()
 
-# Nome validado na sessão ativa
+# Nome validado
 nome_completo = st.session_state.nome_confirmado
 
-# ── PERSISTÊNCIA DA TELA DE CONFIRMAÇÃO ──
-# Procuramos diretamente no JSON se o usuário logado possui vaga garantida
+# ── PERSISTÊNCIA CRÍTICA DA TELA DE CONFIRMAÇÃO ──
 insc = buscar_inscricao_por_nome(dia_ativo, nome_completo)
 
 if insc:
@@ -381,7 +387,7 @@ if insc:
     t_slot = datetime.strptime(slot_inscrito, "%H:%M")
     t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
 
-    # Se o horário agendado não expirou, ele fica retido nesta tela mesmo dando F5
+    # Se o horário agendado NÃO expirou, fica preso aqui direto (mesmo após F5)
     if agora < t_fim.strftime("%H:%M"):
         st.markdown(
             f'<div class="confirmacao-box">'
@@ -404,9 +410,12 @@ if insc:
                 
         st.stop()
     else:
-        # Se o horário já passou, remove do JSON para permitir re-agendamento livre
+        # Se o horário já passou, remove do JSON e limpa a URL para liberar um novo agendamento do zero
         remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
-        st.info("Seu horário anterior já expirou. Você pode escolher uma nova sessão abaixo.")
+        st.query_params.clear()
+        st.session_state.clear()
+        st.info("Seu horário anterior expirou. Por favor, insira seus dados novamente para reagendar.")
+        st.rerun()
 
 # ── ETAPA 2: Escolha de horário ──
 eh_pcd_usuario = st.session_state.eh_pcd
@@ -417,8 +426,8 @@ sobrenome = " ".join(partes[1:])
 status_pcd_texto = " [PCD]" if eh_pcd_usuario else ""
 st.markdown(f"Olá, **{nome_completo}**{status_pcd_texto}! Escolha um horário:")
 if st.button("↩ Alterar cadastro", use_container_width=False):
-    st.session_state.nome_confirmado = None
-    st.session_state.eh_pcd = False
+    st.query_params.clear()
+    st.session_state.clear()
     st.rerun()
 
 st.divider()

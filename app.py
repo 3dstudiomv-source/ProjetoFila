@@ -340,7 +340,9 @@ if not dia_ativo:
 agora = datetime.now(FUSO_BR).strftime("%H:%M")
 
 # ── ETAPA 1: Identificação (Se não houver nome na sessão atual) ──
-if not st.session_state.nome_confirmated_check := st.session_state.get("nome_confirmado"):
+nome_confirmado_atual = st.session_state.get("nome_confirmado")
+
+if not nome_confirmado_atual:
     st.markdown("**Digite seus dados para começar:**")
     
     nome_input = st.text_input(
@@ -358,7 +360,7 @@ if not st.session_state.nome_confirmated_check := st.session_state.get("nome_con
             nome_limpo = f"{partes[0].strip()} {' '.join(partes[1:]).strip()}"
             st.session_state.nome_confirmado = nome_limpo
             
-            # Verificação de Persistência Crítica: Busca se esse nome já agendou hoje
+            # Busca persistente: se o nome já estiver no JSON, puxa o status PCD de lá
             inscricao_existente = buscar_inscricao_por_nome(dia_ativo, nome_limpo)
             if inscricao_existente:
                 st.session_state.eh_pcd = inscricao_existente["pcd"]
@@ -371,7 +373,7 @@ if not st.session_state.nome_confirmated_check := st.session_state.get("nome_con
 nome_completo = st.session_state.nome_confirmado
 
 # ── PERSISTÊNCIA DA TELA DE CONFIRMAÇÃO ──
-# Procuramos no JSON em tempo real se este usuário já possui vaga garantida
+# Procuramos diretamente no JSON se o usuário logado possui vaga garantida
 insc = buscar_inscricao_por_nome(dia_ativo, nome_completo)
 
 if insc:
@@ -379,7 +381,7 @@ if insc:
     t_slot = datetime.strptime(slot_inscrito, "%H:%M")
     t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
 
-    # Se o horário agendado ainda não terminou, a tela fica "presa" aqui (mesmo com F5)
+    # Se o horário agendado não expirou, ele fica retido nesta tela mesmo dando F5
     if agora < t_fim.strftime("%H:%M"):
         st.markdown(
             f'<div class="confirmacao-box">'
@@ -396,14 +398,13 @@ if insc:
         if st.button("❌ Sair desta fila / Mudar horário", use_container_width=True):
             sucesso, msg = remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
             if sucesso:
-                # Mantém os dados cadastrais, mas libera para escolher um novo horário
                 st.rerun()
             else:
                 st.error(f"Erro ao cancelar: {msg}")
                 
         st.stop()
     else:
-        # Se o horário já passou, remove automaticamente a inscrição antiga do banco para permitir re-agendamento
+        # Se o horário já passou, remove do JSON para permitir re-agendamento livre
         remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
         st.info("Seu horário anterior já expirou. Você pode escolher uma nova sessão abaixo.")
 

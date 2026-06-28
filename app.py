@@ -137,13 +137,11 @@ def inscrever(dia: str, slot: str, nome: str, sobrenome: str, eh_pcd: bool) -> t
     return com_lock(_op)
 
 def remover_inscricao(dia: str, slot: str, nome_completo: str) -> tuple[bool, str]:
-    """Remove o usuário da lista, liberando a vaga de volta."""
     def _op():
         db = _ler()
         sessoes_dia = db.get("sessoes", {}).get(dia, {})
         lista = sessoes_dia.get(slot, [])
         
-        # Filtra removendo o usuário da lista pelo nome completo
         nova_lista = [p for p in lista if p["nome"].lower() != nome_completo.lower()]
         
         if len(nova_lista) == len(lista):
@@ -155,6 +153,18 @@ def remover_inscricao(dia: str, slot: str, nome_completo: str) -> tuple[bool, st
         return True, "ok"
 
     return com_lock(_op)
+
+def buscar_inscricao_por_nome(dia: str, nome_completo: str) -> dict | None:
+    """Busca no JSON se o nome completo já possui um agendamento no dia ativo."""
+    if not dia:
+        return None
+    db = _ler()
+    sessoes_dia = db.get("sessoes", {}).get(dia, {})
+    for slot, inscritos in sessoes_dia.items():
+        for p in inscritos:
+            if p["nome"].lower() == nome_completo.lower():
+                return {"dia": dia, "slot": slot, "nome": p["nome"], "pcd": p.get("pcd", False)}
+    return None
 
 def definir_dia_ativo(dia: str) -> None:
     def _op():
@@ -231,8 +241,6 @@ h1, h2, h3, h4 { font-family: 'Syne', sans-serif !important; font-weight: 800 !i
 # ─────────────────────────────────────────────
 # Estado local da sessão
 # ─────────────────────────────────────────────
-if "inscrito" not in st.session_state:
-    st.session_state.inscrito = None
 if "nome_confirmado" not in st.session_state:
     st.session_state.nome_confirmado = None  
 if "eh_pcd" not in st.session_state:
@@ -329,43 +337,10 @@ if not dia_ativo:
     st.info("O evento ainda não foi configurado pelo organizador. Volte em breve!")
     st.stop()
 
-insc = st.session_state.inscrito
 agora = datetime.now(FUSO_BR).strftime("%H:%M")
 
-if insc and insc.get("dia") == dia_ativo:
-    slot_inscrito = insc["slot"]
-    t_slot = datetime.strptime(slot_inscrito, "%H:%M")
-    t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
-
-    if agora < t_fim.strftime("%H:%M"):
-        st.markdown(
-            f'<div class="confirmacao-box">'
-            f'<div class="confirmacao-data">📅 {dia_ativo} &nbsp;|&nbsp; sua reserva</div>'
-            f'<div class="confirmacao-nome">👤 {insc["nome"]}</div>'
-            f'<div class="confirmacao-horario">⏰ {slot_inscrito}</div>'
-            f'<div style="color:#8892b0;font-size:0.85rem;">Apresente esta tela ao chegar.<br>'
-            f'Diga seu nome ao organizador.</div>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-        
-        # ── NOVO: Botão para Sair da Fila ──
-        st.write("") # Pequeno espaçamento visual
-        if st.button("❌ Sair desta fila / Mudar horário", use_container_width=True):
-            sucesso, msg = remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
-            if sucesso:
-                st.session_state.inscrito = None  # Limpa o estado para liberar a escolha
-                st.rerun()
-            else:
-                st.error(f"Erro ao cancelar: {msg}")
-                
-        st.stop()
-    else:
-        st.session_state.inscrito = None
-        st.info("Seu horário já passou. Você pode se inscrever em uma nova sessão.")
-
-# ── ETAPA 1: Identificação ──
-if not st.session_state.nome_confirmado:
+# ── ETAPA 1: Identificação (Se não houver nome na sessão atual) ──
+if not st.session_state.nome_confirmated_check := st.session_state.get("nome_confirmado"):
     st.markdown("**Digite seus dados para começar:**")
     
     nome_input = st.text_input(
@@ -380,13 +355,59 @@ if not st.session_state.nome_confirmado:
         if len(partes) < 2:
             st.warning("⚠️ Digite nome e sobrenome.")
         else:
-            st.session_state.nome_confirmado = nome_input.strip()
-            st.session_state.eh_pcd = marcou_pcd
+            nome_limpo = f"{partes[0].strip()} {' '.join(partes[1:]).strip()}"
+            st.session_state.nome_confirmado = nome_limpo
+            
+            # Verificação de Persistência Crítica: Busca se esse nome já agendou hoje
+            inscricao_existente = buscar_inscricao_por_nome(dia_ativo, nome_limpo)
+            if inscricao_existente:
+                st.session_state.eh_pcd = inscricao_existente["pcd"]
+            else:
+                st.session_state.eh_pcd = marcou_pcd
             st.rerun()
     st.stop()
 
-# ── ETAPA 2: Escolha de horário ──
+# Nome validado na sessão ativa
 nome_completo = st.session_state.nome_confirmado
+
+# ── PERSISTÊNCIA DA TELA DE CONFIRMAÇÃO ──
+# Procuramos no JSON em tempo real se este usuário já possui vaga garantida
+insc = buscar_inscricao_por_nome(dia_ativo, nome_completo)
+
+if insc:
+    slot_inscrito = insc["slot"]
+    t_slot = datetime.strptime(slot_inscrito, "%H:%M")
+    t_fim  = t_slot + timedelta(minutes=DURACAO_MIN)
+
+    # Se o horário agendado ainda não terminou, a tela fica "presa" aqui (mesmo com F5)
+    if agora < t_fim.strftime("%H:%M"):
+        st.markdown(
+            f'<div class="confirmacao-box">'
+            f'<div class="confirmacao-data">📅 {dia_ativo} &nbsp;|&nbsp; sua reserva</div>'
+            f'<div class="confirmacao-nome">👤 {insc["nome"]}</div>'
+            f'<div class="confirmacao-horario">⏰ {slot_inscrito}</div>'
+            f'<div style="color:#8892b0;font-size:0.85rem;">Apresente esta tela ao chegar.<br>'
+            f'Diga seu nome ao organizador.</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        
+        st.write("") 
+        if st.button("❌ Sair desta fila / Mudar horário", use_container_width=True):
+            sucesso, msg = remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
+            if sucesso:
+                # Mantém os dados cadastrais, mas libera para escolher um novo horário
+                st.rerun()
+            else:
+                st.error(f"Erro ao cancelar: {msg}")
+                
+        st.stop()
+    else:
+        # Se o horário já passou, remove automaticamente a inscrição antiga do banco para permitir re-agendamento
+        remover_inscricao(dia_ativo, slot_inscrito, insc["nome"])
+        st.info("Seu horário anterior já expirou. Você pode escolher uma nova sessão abaixo.")
+
+# ── ETAPA 2: Escolha de horário ──
 eh_pcd_usuario = st.session_state.eh_pcd
 partes = nome_completo.split()
 nome      = partes[0]
@@ -461,11 +482,6 @@ for slot in SLOTS:
 if slot_escolhido:
     sucesso, msg = inscrever(dia_ativo, slot_escolhido, nome, sobrenome, eh_pcd_usuario)
     if sucesso:
-        st.session_state.inscrito = {
-            "dia":  dia_ativo,
-            "slot": slot_escolhido,
-            "nome": nome_completo
-        }
         st.rerun()
     else:
         st.error(f"❌ {msg}")
